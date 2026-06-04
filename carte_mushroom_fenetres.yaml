@@ -1,0 +1,184 @@
+# ═══════════════════════════════════════════════════════
+# CARTE MUSHROOM — Surveillance fenêtres par pièce
+# ═══════════════════════════════════════════════════════
+#
+# Prérequis HACS :
+#   - mushroom (lovelace-mushroom)
+#
+# Logique couleur du chip :
+#   delta > seuil  → bleu  (pièce plus chaude, intéressant d'aérer)
+#   delta < 0      → rouge (pièce plus froide que dehors, ferme !)
+#   entre les deux → gris  (neutre)
+#   fenêtre fermée → pas de couleur (chip grisé)
+#
+# Icône :
+#   mdi:window-open  → fenêtre ouverte (input_boolean ON)
+#   mdi:window-closed-variant → fenêtre fermée (input_boolean OFF)
+#
+# Tap action : toggle l'input_boolean (ouvre/ferme manuellement)
+# ═══════════════════════════════════════════════════════
+
+type: custom:mushroom-chips-card
+chips:
+
+  # ── SALON ──────────────────────────────────────────
+  - type: template
+    entity: input_boolean.fenetre_salon
+    # Icon changes with window state
+    icon: >
+      {% if is_state('input_boolean.fenetre_salon', 'on') %}
+        mdi:window-open
+      {% else %}
+        mdi:window-closed-variant
+      {% endif %}
+    # Color reflects thermal interest (only when open)
+    icon_color: >
+      {% if is_state('input_boolean.fenetre_salon', 'off') %}
+        disabled
+      {% else %}
+        {% set delta = states('sensor.aerer_salon') | float(0) %}
+        {% if delta > 0.3 %}
+          blue
+        {% elif delta < 0 %}
+          red
+        {% else %}
+          grey
+        {% endif %}
+      {% endif %}
+    content: >
+      Salon
+      {% if is_state('input_boolean.fenetre_salon', 'on') %}
+        · {{ states('sensor.aerer_salon') }}°
+      {% endif %}
+    tap_action:
+      action: toggle
+    hold_action:
+      action: more-info
+
+  # ── CHAMBRE PARENTALE ──────────────────────────────
+  - type: template
+    entity: input_boolean.fenetre_chambre_parentale
+    icon: >
+      {% if is_state('input_boolean.fenetre_chambre_parentale', 'on') %}
+        mdi:window-open
+      {% else %}
+        mdi:window-closed-variant
+      {% endif %}
+    icon_color: >
+      {% if is_state('input_boolean.fenetre_chambre_parentale', 'off') %}
+        disabled
+      {% else %}
+        {% set delta = states('sensor.aerer_chambre_parentale') | float(0) %}
+        {% if delta > 0.3 %}
+          blue
+        {% elif delta < 0 %}
+          red
+        {% else %}
+          grey
+        {% endif %}
+      {% endif %}
+    content: >
+      Ch. Parentale
+      {% if is_state('input_boolean.fenetre_chambre_parentale', 'on') %}
+        · {{ states('sensor.aerer_chambre_parentale') }}°
+      {% endif %}
+    tap_action:
+      action: toggle
+    hold_action:
+      action: more-info
+
+  # ── BUREAU ─────────────────────────────────────────
+  - type: template
+    entity: input_boolean.fenetre_bureau
+    icon: >
+      {% if is_state('input_boolean.fenetre_bureau', 'on') %}
+        mdi:window-open
+      {% else %}
+        mdi:window-closed-variant
+      {% endif %}
+    icon_color: >
+      {% if is_state('input_boolean.fenetre_bureau', 'off') %}
+        disabled
+      {% else %}
+        {% set delta = states('sensor.aerer_bureau') | float(0) %}
+        {% if delta > 0.3 %}
+          blue
+        {% elif delta < 0 %}
+          red
+        {% else %}
+          grey
+        {% endif %}
+      {% endif %}
+    content: >
+      Bureau
+      {% if is_state('input_boolean.fenetre_bureau', 'on') %}
+        · {{ states('sensor.aerer_bureau') }}°
+      {% endif %}
+    tap_action:
+      action: toggle
+    hold_action:
+      action: more-info
+
+  # ── CHAMBRE D'AMIS ─────────────────────────────────
+  - type: template
+    entity: input_boolean.fenetre_chambre_amis
+    icon: >
+      {% if is_state('input_boolean.fenetre_chambre_amis', 'on') %}
+        mdi:window-open
+      {% else %}
+        mdi:window-closed-variant
+      {% endif %}
+    icon_color: >
+      {% if is_state('input_boolean.fenetre_chambre_amis', 'off') %}
+        disabled
+      {% else %}
+        {% set delta = states('sensor.aerer_chambre_d_amis') | float(0) %}
+        {% if delta > 0.3 %}
+          blue
+        {% elif delta < 0 %}
+          red
+        {% else %}
+          grey
+        {% endif %}
+      {% endif %}
+    content: >
+      Ch. Amis
+      {% if is_state('input_boolean.fenetre_chambre_amis', 'on') %}
+        · {{ states('sensor.aerer_chambre_d_amis') }}°
+      {% endif %}
+    tap_action:
+      action: toggle
+    hold_action:
+      action: more-info
+
+  # ── SALLE DE SPORT ─────────────────────────────────
+  - type: template
+    entity: input_boolean.fenetre_salle_de_sport
+    icon: >
+      {% if is_state('input_boolean.fenetre_salle_de_sport', 'on') %}
+        mdi:window-open
+      {% else %}
+        mdi:window-closed-variant
+      {% endif %}
+    icon_color: >
+      {% if is_state('input_boolean.fenetre_salle_de_sport', 'off') %}
+        disabled
+      {% else %}
+        {% set delta = states('sensor.aerer_salle_de_sport') | float(0) %}
+        {% if delta > 0.3 %}
+          blue
+        {% elif delta < 0 %}
+          red
+        {% else %}
+          grey
+        {% endif %}
+      {% endif %}
+    content: >
+      Sport
+      {% if is_state('input_boolean.fenetre_salle_de_sport', 'on') %}
+        · {{ states('sensor.aerer_salle_de_sport') }}°
+      {% endif %}
+    tap_action:
+      action: toggle
+    hold_action:
+      action: more-info
