@@ -49,8 +49,13 @@ blueprint:
     sensor_tendance:
       name: Capteur de tendance (binary_sensor)
       description: >
-        binary_sensor indiquant si la température de la pièce est en hausse.
-        État "on" = température montante.
+        binary_sensor indiquant la tendance de température de la pièce.
+        État "on" = température montante, "off" = descendante ou stable.
+
+        L'alerte est envoyée uniquement si la tendance est "off" (descendante
+        ou stable) — si la pièce se refroidit déjà toute seule, inutile d'alerter.
+        Si la tendance est "on" (montante) et le delta est faible, l'alerte
+        part quand même car la pièce va continuer à se réchauffer.
 
         Si vous n'en avez pas encore : Paramètres → Appareils et services →
         Ajouter une intégration → "Capteur de gradient" (Derivative).
@@ -251,11 +256,12 @@ actions:
             value_template: >
               {{ v_delta != 'none' and v_delta is not none
                  and v_delta | float < v_seuil | float }}
-          # If tendance enabled: only alert when temperature is rising
+          # If tendance enabled: alert when temperature is NOT rising
+          # (if already cooling down, no need to alert — room is self-cooling)
           - condition: template
             value_template: >
               {% if v_tendance_on and v_tendance != '' %}
-                {{ is_state(v_tendance, 'on') }}
+                {{ is_state(v_tendance, 'off') or is_state(v_tendance, 'unavailable') }}
               {% else %}
                 true
               {% endif %}
