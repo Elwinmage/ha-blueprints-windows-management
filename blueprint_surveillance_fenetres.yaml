@@ -108,18 +108,12 @@ blueprint:
     notification_target:
       name: Service de notification
       description: >
-        Nom du service notify à appeler pour les alertes.
-        Saisir uniquement la partie après "notify." — exemples :
-
-          mobile_app_mon_telephone
-          group_de_notification_les_cheris
-          group_de_notification_admin
-
-        Les groupes définis dans configuration.yaml (notify: platform: group)
-        sont accessibles via leur name en snake_case.
-      default: "notify"
+        Service notify à appeler pour les alertes.
+        Sélectionner dans la liste ou taper "notify." pour filtrer.
+        Exemples : notify.group_de_notification_les_cheris,
+        notify.mobile_app_mon_telephone
       selector:
-        text:
+        action:
 
     # ── 6. CLIMATISATION ─────────────────────────────────────────────────────
     gestion_clim:
@@ -260,7 +254,7 @@ actions:
                 true
               {% endif %}
         sequence:
-          - action: "notify.{{ notification_target }}"
+          - action: "{{ notification_target }}"
             data:
               title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
               message: >
