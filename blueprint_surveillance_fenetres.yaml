@@ -47,7 +47,19 @@ blueprint:
       selector:
         boolean:
 
-    # ── 4. SEUIL & FRÉQUENCE ─────────────────────────────────────────────────
+    # ── 4. FENÊTRE ───────────────────────────────────────────────────────────
+    fenetre_boolean:
+      name: État de la fenêtre (input_boolean)
+      description: >
+        input_boolean représentant l'état ouvert/fermé de la fenêtre.
+        Doit contenir "fenetre" dans l'entity_id et être assigné à la zone.
+        Nécessaire pour les triggers — ne peut pas être auto-détecté.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+
+    # ── 5. SEUIL & FRÉQUENCE ─────────────────────────────────────────────────
     seuil_fermeture:
       name: Seuil de fermeture (°C)
       description: >
@@ -119,6 +131,8 @@ variables:
   v_tendance_on:  !input utiliser_tendance
   v_gestion_clim: !input gestion_clim
   v_memoire:      !input memoire_clim
+  # Window boolean is also an explicit input (needed for triggers)
+  v_fenetre:      !input fenetre_boolean
 
   # Interior temperature sensor: first sensor with device_class=temperature in the area.
   # If multiple sensors exist, their values are averaged.
@@ -148,16 +162,6 @@ variables:
     {% set ns = namespace(found='') %}
     {% for e in area_entities(v_area) %}
       {% if e.startswith('binary_sensor.') and 'tendance' in e %}
-        {% set ns.found = e %}
-      {% endif %}
-    {% endfor %}
-    {{ ns.found }}
-
-  # First input_boolean with "fenetre" in entity_id within the area
-  v_fenetre: >
-    {% set ns = namespace(found='') %}
-    {% for e in area_entities(v_area) %}
-      {% if e.startswith('input_boolean.') and 'fenetre' in e %}
         {% set ns.found = e %}
       {% endif %}
     {% endfor %}
@@ -196,33 +200,17 @@ triggers:
     id: check_delta
     minutes: !input duree_avant_alerte
 
-  # Window opened (detected via variable — re-evaluated at trigger time)
-  - trigger: template
+  # Window opened — classic state trigger on the explicit input_boolean
+  - trigger: state
     id: fenetre_ouverte
-    value_template: >
-      {% set ns = namespace(found='') %}
-      {% for e in area_entities(!input piece) %}
-        {% if e.startswith('input_boolean.') and 'fenetre' in e %}
-          {% set ns.found = e %}
-        {% endif %}
-      {% endfor %}
-      {{ is_state(ns.found, 'on') }}
-    for:
-      seconds: 1
+    entity_id: !input fenetre_boolean
+    to: "on"
 
   # Window closed
-  - trigger: template
+  - trigger: state
     id: fenetre_fermee
-    value_template: >
-      {% set ns = namespace(found='') %}
-      {% for e in area_entities(!input piece) %}
-        {% if e.startswith('input_boolean.') and 'fenetre' in e %}
-          {% set ns.found = e %}
-        {% endif %}
-      {% endfor %}
-      {{ is_state(ns.found, 'off') }}
-    for:
-      seconds: 1
+    entity_id: !input fenetre_boolean
+    to: "off"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONDITIONS
