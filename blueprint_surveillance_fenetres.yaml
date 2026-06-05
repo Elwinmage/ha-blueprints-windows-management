@@ -103,18 +103,27 @@ blueprint:
       description: >
         Si activé, coupe la clim quand la fenêtre est ouverte et la rallume
         (si elle tournait) quand la fenêtre est refermée.
-        L'entité climate est détectée automatiquement dans la zone.
       default: false
       selector:
         boolean:
+
+    clim_entity:
+      name: Entité climatisation (optionnel)
+      description: >
+        Entité climate à couper/rallumer selon l'état de la fenêtre.
+        Obligatoire si "Gérer la climatisation" est activé.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: climate
 
     memoire_clim:
       name: Mémoire état clim (input_boolean, optionnel)
       description: >
         input_boolean dédié pour mémoriser si la clim tournait avant l'ouverture.
-        Créer un input_boolean par pièce (ex. input_boolean.clim_salon_etait_allumee)
-        et l'assigner à la zone. Il sera détecté automatiquement si son
-        entity_id contient "memoire" ou "etait".
+        Créer un input_boolean par pièce (ex. input_boolean.clim_salon_etait_allumee).
+        Obligatoire si "Gérer la climatisation" est activé.
       default: ""
       selector:
         entity:
@@ -130,6 +139,7 @@ variables:
   v_seuil:        !input seuil_fermeture
   v_tendance_on:  !input utiliser_tendance
   v_gestion_clim: !input gestion_clim
+  v_clim:         !input clim_entity
   v_memoire:      !input memoire_clim
   # Window boolean is also an explicit input (needed for triggers)
   v_fenetre:      !input fenetre_boolean
@@ -162,16 +172,6 @@ variables:
     {% set ns = namespace(found='') %}
     {% for e in area_entities(v_area) %}
       {% if e.startswith('binary_sensor.') and 'tendance' in e %}
-        {% set ns.found = e %}
-      {% endif %}
-    {% endfor %}
-    {{ ns.found }}
-
-  # First climate entity within the area
-  v_clim: >
-    {% set ns = namespace(found='') %}
-    {% for e in area_entities(v_area) %}
-      {% if e.startswith('climate.') %}
         {% set ns.found = e %}
       {% endif %}
     {% endfor %}

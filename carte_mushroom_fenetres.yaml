@@ -1,220 +1,158 @@
-# ═══════════════════════════════════════════════════════
-# CARTE MUSHROOM — Surveillance fenêtres par pièce
-# + bouton global ouvrir/fermer tout
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# CARTE MUSHROOM — Surveillance fenêtres par pièce + contrôle global
+# Utilise decluttering-card pour éviter la répétition par pièce
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-# Prérequis HACS : lovelace-mushroom
+# Prérequis HACS :
+#   - lovelace-mushroom
+#   - decluttering-card
+#   - card-mod (pour l'opacité des fenêtres fermées)
 #
-# Chip global (premier chip) :
-#   - Toutes fermées  → icône mdi:window-closed-variant, gris
-#   - Partiellement   → icône mdi:window-open, orange
-#   - Toutes ouvertes → icône mdi:window-open, vert
-#   - Tap             → toggle input_boolean.fenetres_global
+# Déclarer le template decluttering dans lovelace (configuration UI ou yaml) :
+#   Voir section "decluttering_templates" ci-dessous
 #
-# Chips individuels :
-#   delta > seuil → bleu  (utile d'aérer)
-#   delta < 0     → rouge (plus frais dedans, fermer)
-#   neutre        → gris
-#   fermée        → chip atténué
-#   Tap           → toggle l'input_boolean de la pièce
-#   Hold          → more-info
-# ═══════════════════════════════════════════════════════
+# Variables du template chip_fenetre :
+#   fenetre  : entity_id de l'input_boolean fenêtre   (ex. input_boolean.fenetre_salon)
+#   delta    : entity_id du sensor delta temp          (ex. sensor.aerer_salon)
+#   label    : nom affiché dans le chip                (ex. Salon)
+#   seuil    : seuil d'alerte en °C                   (défaut 0.3)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-type: custom:mushroom-chips-card
-chips:
+# ── ÉTAPE 1 : déclarer le template dans lovelace (yaml ou UI) ─────────────────
+# À ajouter dans configuration.yaml (mode yaml) ou dans l'éditeur de ressources
+# Lovelace > Templates decluttering :
 
-  # ── BOUTON GLOBAL ─────────────────────────────────────────────────────────
-  - type: template
-    entity: input_boolean.fenetres_global
-    icon: >
-      {% set fenetres = [
-        'input_boolean.fenetre_salon',
-        'input_boolean.fenetre_chambre_parentale',
-        'input_boolean.fenetre_bureau',
-        'input_boolean.fenetre_chambre_amis',
-        'input_boolean.fenetre_salle_de_sport'
-      ] %}
-      {% set nb_ouvertes = fenetres | select('is_state', 'on') | list | count %}
-      {% if nb_ouvertes == 0 %}
-        mdi:window-closed-variant
-      {% else %}
-        mdi:window-open
-      {% endif %}
-    icon_color: >
-      {% set fenetres = [
-        'input_boolean.fenetre_salon',
-        'input_boolean.fenetre_chambre_parentale',
-        'input_boolean.fenetre_bureau',
-        'input_boolean.fenetre_chambre_amis',
-        'input_boolean.fenetre_salle_de_sport'
-      ] %}
-      {% set nb_ouvertes = fenetres | select('is_state', 'on') | list | count %}
-      {% set total = fenetres | count %}
-      {% if nb_ouvertes == 0 %}
-        grey
-      {% elif nb_ouvertes == total %}
-        green
-      {% else %}
-        orange
-      {% endif %}
-    content: >
-      {% set fenetres = [
-        'input_boolean.fenetre_salon',
-        'input_boolean.fenetre_chambre_parentale',
-        'input_boolean.fenetre_bureau',
-        'input_boolean.fenetre_chambre_amis',
-        'input_boolean.fenetre_salle_de_sport'
-      ] %}
-      {% set nb_ouvertes = fenetres | select('is_state', 'on') | list | count %}
-      {% set total = fenetres | count %}
-      {% if nb_ouvertes == 0 %}
-        Tout fermé
-      {% elif nb_ouvertes == total %}
-        Tout ouvert
-      {% else %}
-        {{ nb_ouvertes }}/{{ total }} ouvertes
-      {% endif %}
-    tap_action:
-      action: toggle
-    hold_action:
-      action: more-info
-    chip_style: >
-      border: 1px solid var(--divider-color);
+decluttering_templates:
+  chip_fenetre:
+    default:
+      - seuil: 0.3
+    card:
+      type: custom:mushroom-chips-card
+      chips:
+        - type: template
+          entity: "[[fenetre]]"
+          icon: >
+            {{ 'mdi:window-open' if is_state('[[fenetre]]', 'on')
+               else 'mdi:window-closed-variant' }}
+          icon_color: >
+            {% if is_state('[[fenetre]]', 'off') %}grey
+            {% else %}
+              {% set d = states('[[delta]]') | float(0) %}
+              {% if d > [[seuil]] %}blue{% elif d < 0 %}red{% else %}grey{% endif %}
+            {% endif %}
+          content: >
+            [[label]]
+            {%- if is_state('[[fenetre]]', 'on') %}
+              · {% set d = states('[[delta]]') | float(0) %}
+              {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C
+            {%- endif %}
+          tap_action:
+            action: call-service
+            service: input_boolean.toggle
+            service_data:
+              entity_id: "[[fenetre]]"
+          hold_action:
+            action: more-info
+          card_mod:
+            style: |
+              :host {
+                {% if is_state('[[fenetre]]', 'off') %}
+                  opacity: 0.45;
+                {% endif %}
+              }
 
-  # ── SÉPARATEUR ────────────────────────────────────────────────────────────
-  - type: spacer
+# ── ÉTAPE 2 : la carte dashboard ─────────────────────────────────────────────
 
-  # ── SALON ─────────────────────────────────────────────────────────────────
-  - type: template
-    entity: input_boolean.fenetre_salon
-    icon: >
-      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_salon', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% if is_state('input_boolean.fenetre_salon', 'off') %}
-        grey
-      {% else %}
-        {% set delta = states('sensor.aerer_salon') | float(0) %}
-        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
-      {% endif %}
-    content: >
-      Salon
-      {%- if is_state('input_boolean.fenetre_salon', 'on') %}
-        · {{ states('sensor.aerer_salon') }}°
-      {%- endif %}
-    style: >
-      {% if is_state('input_boolean.fenetre_salon', 'off') %}
-        opacity: 0.45;
-      {% endif %}
-    tap_action:
-      action: toggle
-    hold_action:
-      action: more-info
+type: vertical-stack
+cards:
 
-  # ── CHAMBRE PARENTALE ─────────────────────────────────────────────────────
-  - type: template
-    entity: input_boolean.fenetre_chambre_parentale
-    icon: >
-      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_chambre_parentale', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% if is_state('input_boolean.fenetre_chambre_parentale', 'off') %}
-        grey
-      {% else %}
-        {% set delta = states('sensor.aerer_chambre_parentale') | float(0) %}
-        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
-      {% endif %}
-    content: >
-      Ch. Parentale
-      {%- if is_state('input_boolean.fenetre_chambre_parentale', 'on') %}
-        · {{ states('sensor.aerer_chambre_parentale') }}°
-      {%- endif %}
-    style: >
-      {% if is_state('input_boolean.fenetre_chambre_parentale', 'off') %}
-        opacity: 0.45;
-      {% endif %}
-    tap_action:
-      action: toggle
-    hold_action:
-      action: more-info
+  # -- Chip global + chips pièces -------------------------------------------
+  - type: custom:mushroom-chips-card
+    chips:
 
-  # ── BUREAU ────────────────────────────────────────────────────────────────
-  - type: template
-    entity: input_boolean.fenetre_bureau
-    icon: >
-      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_bureau', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% if is_state('input_boolean.fenetre_bureau', 'off') %}
-        grey
-      {% else %}
-        {% set delta = states('sensor.aerer_bureau') | float(0) %}
-        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
-      {% endif %}
-    content: >
-      Bureau
-      {%- if is_state('input_boolean.fenetre_bureau', 'on') %}
-        · {{ states('sensor.aerer_bureau') }}°
-      {%- endif %}
-    style: >
-      {% if is_state('input_boolean.fenetre_bureau', 'off') %}
-        opacity: 0.45;
-      {% endif %}
-    tap_action:
-      action: toggle
-    hold_action:
-      action: more-info
+      # Bouton global ouvrir/fermer tout
+      - type: template
+        entity: input_boolean.fenetres_global
+        icon: >
+          {% set fenetres = [
+            'input_boolean.fenetre_salon',
+            'input_boolean.fenetre_chambre_parentale',
+            'input_boolean.fenetre_bureau',
+            'input_boolean.fenetre_chambre_amis',
+            'input_boolean.fenetre_salle_de_sport'
+          ] %}
+          {% if fenetres | select('is_state', 'on') | list | count == 0 %}
+            mdi:window-closed-variant
+          {% else %}
+            mdi:window-open
+          {% endif %}
+        icon_color: >
+          {% set fenetres = [
+            'input_boolean.fenetre_salon',
+            'input_boolean.fenetre_chambre_parentale',
+            'input_boolean.fenetre_bureau',
+            'input_boolean.fenetre_chambre_amis',
+            'input_boolean.fenetre_salle_de_sport'
+          ] %}
+          {% set nb = fenetres | select('is_state', 'on') | list | count %}
+          {% if nb == 0 %}grey
+          {% elif nb == fenetres | count %}green
+          {% else %}orange{% endif %}
+        content: >
+          {% set fenetres = [
+            'input_boolean.fenetre_salon',
+            'input_boolean.fenetre_chambre_parentale',
+            'input_boolean.fenetre_bureau',
+            'input_boolean.fenetre_chambre_amis',
+            'input_boolean.fenetre_salle_de_sport'
+          ] %}
+          {% set nb = fenetres | select('is_state', 'on') | list | count %}
+          {% set total = fenetres | count %}
+          {% if nb == 0 %}Tout fermé
+          {% elif nb == total %}Tout ouvert
+          {% else %}{{ nb }}/{{ total }} ouvertes{% endif %}
+        tap_action:
+          action: call-service
+          service: input_boolean.toggle
+          service_data:
+            entity_id: input_boolean.fenetres_global
+        hold_action:
+          action: more-info
 
-  # ── CHAMBRE D'AMIS ────────────────────────────────────────────────────────
-  - type: template
-    entity: input_boolean.fenetre_chambre_amis
-    icon: >
-      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_chambre_amis', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% if is_state('input_boolean.fenetre_chambre_amis', 'off') %}
-        grey
-      {% else %}
-        {% set delta = states('sensor.aerer_chambre_d_amis') | float(0) %}
-        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
-      {% endif %}
-    content: >
-      Ch. Amis
-      {%- if is_state('input_boolean.fenetre_chambre_amis', 'on') %}
-        · {{ states('sensor.aerer_chambre_d_amis') }}°
-      {%- endif %}
-    style: >
-      {% if is_state('input_boolean.fenetre_chambre_amis', 'off') %}
-        opacity: 0.45;
-      {% endif %}
-    tap_action:
-      action: toggle
-    hold_action:
-      action: more-info
+      - type: spacer
 
-  # ── SALLE DE SPORT ────────────────────────────────────────────────────────
-  - type: template
-    entity: input_boolean.fenetre_salle_de_sport
-    icon: >
-      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_salle_de_sport', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% if is_state('input_boolean.fenetre_salle_de_sport', 'off') %}
-        grey
-      {% else %}
-        {% set delta = states('sensor.aerer_salle_de_sport') | float(0) %}
-        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
-      {% endif %}
-    content: >
-      Sport
-      {%- if is_state('input_boolean.fenetre_salle_de_sport', 'on') %}
-        · {{ states('sensor.aerer_salle_de_sport') }}°
-      {%- endif %}
-    style: >
-      {% if is_state('input_boolean.fenetre_salle_de_sport', 'off') %}
-        opacity: 0.45;
-      {% endif %}
-    tap_action:
-      action: toggle
-    hold_action:
-      action: more-info
+  # -- Chips individuels via decluttering ------------------------------------
+  - type: custom:decluttering-card
+    template: chip_fenetre
+    variables:
+      - fenetre: input_boolean.fenetre_salon
+      - delta: sensor.aerer_salon
+      - label: Salon
+
+  - type: custom:decluttering-card
+    template: chip_fenetre
+    variables:
+      - fenetre: input_boolean.fenetre_chambre_parentale
+      - delta: sensor.aerer_chambre_parentale
+      - label: Ch. Parentale
+
+  - type: custom:decluttering-card
+    template: chip_fenetre
+    variables:
+      - fenetre: input_boolean.fenetre_bureau
+      - delta: sensor.aerer_bureau
+      - label: Bureau
+
+  - type: custom:decluttering-card
+    template: chip_fenetre
+    variables:
+      - fenetre: input_boolean.fenetre_chambre_amis
+      - delta: sensor.aerer_chambre_d_amis
+      - label: Ch. Amis
+
+  - type: custom:decluttering-card
+    template: chip_fenetre
+    variables:
+      - fenetre: input_boolean.fenetre_salle_de_sport
+      - delta: sensor.aerer_salle_de_sport
+      - label: Sport
