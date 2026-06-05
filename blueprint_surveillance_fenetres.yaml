@@ -1,52 +1,94 @@
 blueprint:
   name: "Surveillance fenêtre — aération par pièce"
   description: >
-    Gère une fenêtre par pièce : alerte quand il n'est plus utile de laisser
-    la fenêtre ouverte (delta temp intérieur/extérieur trop faible), et
-    optionnellement coupe/rallume la climatisation en fonction de l'état de la fenêtre.
+    Gère une fenêtre par pièce : calcule le delta intérieur/extérieur, alerte
+    quand il n'est plus utile de laisser la fenêtre ouverte, et optionnellement
+    coupe/rallume la climatisation selon l'état de la fenêtre.
+    Les entités (capteur intérieur, tendance, fenêtre, clim) sont filtrées
+    sur la pièce sélectionnée.
   domain: automation
   author: Elwin
   homeassistant:
     min_version: "2024.6.0"
 
   input:
-    # --- Room identity ---
-    room_name:
-      name: Nom de la pièce
-      description: Utilisé dans les notifications (ex. "Salon", "Bureau")
-      selector:
-        text:
 
-    # --- Core sensors & toggles ---
-    sensor_delta:
-      name: Capteur delta température (intérieur - extérieur)
+    # ── 1. PIÈCE ────────────────────────────────────────────────────────────
+    piece:
+      name: Pièce
       description: >
-        Sensor template qui calcule la différence de température
-        entre la pièce et l'extérieur. Positif = pièce plus chaude.
+        La pièce / zone Home Assistant à surveiller.
+        Les entités ci-dessous seront filtrées sur cette zone.
+      selector:
+        area:
+
+    # ── 2. CAPTEURS TEMPÉRATURE ─────────────────────────────────────────────
+    sensor_interieur:
+      name: Capteur température intérieure
+      description: Capteur de température dans la pièce sélectionnée.
       selector:
         entity:
-          domain: sensor
+          filter:
+            - domain: sensor
+              device_class: temperature
+          area: !input piece
 
+    sensor_exterieur:
+      name: Capteur température extérieure
+      description: >
+        Capteur de température extérieure (non attaché à une pièce).
+        Partagé entre toutes les instances du blueprint.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+
+    # ── 3. TENDANCE (optionnel) ──────────────────────────────────────────────
+    utiliser_tendance:
+      name: Utiliser le capteur de tendance ?
+      description: >
+        Si activé, le blueprint surveille aussi le binary_sensor de tendance
+        pour affiner l'alerte (alerte seulement si tendance montante).
+      default: false
+      selector:
+        boolean:
+
+    sensor_tendance:
+      name: Capteur de tendance de température (optionnel)
+      description: >
+        binary_sensor indiquant si la température de la pièce est en hausse.
+        État "on" = température montante. Filtré sur la pièce sélectionnée.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+          area: !input piece
+
+    # ── 4. FENÊTRE ──────────────────────────────────────────────────────────
     fenetre_boolean:
-      name: input_boolean — état de la fenêtre
+      name: État de la fenêtre (input_boolean)
       description: >
         input_boolean représentant l'état ouvert/fermé de la fenêtre.
-        Le blueprint le surveille pour déclencher les actions clim.
+        Filtré sur la pièce sélectionnée.
       selector:
         entity:
-          domain: input_boolean
+          filter:
+            - domain: input_boolean
+          area: !input piece
 
-    # --- Alert threshold ---
+    # ── 5. SEUIL & DURÉE ────────────────────────────────────────────────────
     seuil_fermeture:
       name: Seuil de fermeture (°C)
       description: >
-        Quand le delta tombe sous ce seuil pendant la durée définie,
-        une notification est envoyée. Défaut : 0.3°C
+        Alerte envoyée quand le delta (intérieur − extérieur) passe sous ce seuil
+        pendant la durée définie. Défaut : 0.3 °C
       default: 0.3
       selector:
         number:
-          min: 0
-          max: 3
+          min: 0.0
+          max: 3.0
           step: 0.1
           unit_of_measurement: "°C"
           mode: slider
@@ -54,8 +96,8 @@ blueprint:
     duree_avant_alerte:
       name: Durée avant alerte (minutes)
       description: >
-        Le delta doit rester sous le seuil pendant cette durée avant
-        d'envoyer la notification.
+        Le delta doit rester sous le seuil pendant cette durée avant d'envoyer
+        la notification.
       default: 2
       selector:
         number:
@@ -65,19 +107,22 @@ blueprint:
           unit_of_measurement: min
           mode: slider
 
-    # --- Notification ---
+    # ── 6. NOTIFICATION ─────────────────────────────────────────────────────
     notification_target:
       name: Cible de notification
-      description: Service notify à appeler (ex. notify.mobile_app_mon_telephone)
+      description: >
+        Entité ou groupe notify à utiliser pour les alertes.
       selector:
         target:
           entity:
             domain: notify
 
-    # --- Clim (optional) ---
+    # ── 7. CLIMATISATION (optionnel) ────────────────────────────────────────
     gestion_clim:
       name: Gérer la climatisation ?
-      description: Activer pour couper/rallumer la clim selon l'état de la fenêtre
+      description: >
+        Si activé, coupe la clim quand la fenêtre est ouverte et la rallume
+        (si elle tournait) quand la fenêtre est refermée.
       default: false
       selector:
         boolean:
@@ -85,87 +130,119 @@ blueprint:
     clim_entity:
       name: Entité climatisation (optionnel)
       description: >
-        Climate entity à couper quand la fenêtre est ouverte,
-        et à rallumer (si elle tournait) quand elle est refermée.
+        Entité climate à couper/rallumer selon l'état de la fenêtre.
+        Filtrée sur la pièce sélectionnée.
       default: ""
       selector:
         entity:
-          domain: climate
+          filter:
+            - domain: climate
+          area: !input piece
 
     memoire_clim:
-      name: input_boolean mémoire clim (optionnel)
+      name: Mémoire état clim (input_boolean, optionnel)
       description: >
-        input_boolean utilisé pour mémoriser si la clim tournait
-        avant l'ouverture de la fenêtre. Créer un input_boolean dédié par pièce.
+        input_boolean dédié pour mémoriser si la clim tournait avant l'ouverture.
+        Créer un input_boolean par pièce (ex. input_boolean.clim_salon_etait_allumee).
+        Filtré sur la pièce sélectionnée.
       default: ""
       selector:
         entity:
-          domain: input_boolean
+          filter:
+            - domain: input_boolean
+          area: !input piece
 
-# ─────────────────────────────────────────────
-# VARIABLES — resolve inputs once for reuse
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLES
+# ─────────────────────────────────────────────────────────────────────────────
 variables:
-  v_room: !input room_name
-  v_sensor: !input sensor_delta
-  v_fenetre: !input fenetre_boolean
-  v_seuil: !input seuil_fermeture
-  v_gestion_clim: !input gestion_clim
-  v_clim: !input clim_entity
-  v_memoire: !input memoire_clim
+  v_int:            !input sensor_interieur
+  v_ext:            !input sensor_exterieur
+  v_fenetre:        !input fenetre_boolean
+  v_seuil:          !input seuil_fermeture
+  v_tendance_on:    !input utiliser_tendance
+  v_tendance:       !input sensor_tendance
+  v_gestion_clim:   !input gestion_clim
+  v_clim:           !input clim_entity
+  v_memoire:        !input memoire_clim
+  # Computed delta — used in notification message
+  v_delta: >
+    {% set t_int = states(v_int) | float(none) %}
+    {% set t_ext = states(v_ext) | float(none) %}
+    {% if t_int is not none and t_ext is not none %}
+      {{ (t_int - t_ext) | round(1) }}
+    {% else %}
+      none
+    {% endif %}
+  # Friendly area name for notifications
+  v_piece_label: >
+    {{ area_name(v_fenetre) | default('la pièce') }}
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # TRIGGERS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 triggers:
-  # Alert: delta below threshold for defined duration
-  - trigger: numeric_state
-    id: delta_bas
-    entity_id: !input sensor_delta
-    below: !input seuil_fermeture
-    for:
-      minutes: !input duree_avant_alerte
+  # Periodic check: re-evaluate delta every minute when window is open
+  - trigger: time_pattern
+    id: check_delta
+    minutes: "/1"
 
-  # Clim management: window opened
+  # Window opened
   - trigger: state
     id: fenetre_ouverte
     entity_id: !input fenetre_boolean
     to: "on"
 
-  # Clim management: window closed
+  # Window closed
   - trigger: state
     id: fenetre_fermee
     entity_id: !input fenetre_boolean
     to: "off"
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # CONDITIONS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 conditions: []
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # ACTIONS
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 actions:
   - choose:
 
-      # ── Trigger: delta too low → alert if window is open ──
+      # ── Periodic check: delta too low → alert ───────────────────────────────
       - conditions:
           - condition: trigger
-            id: delta_bas
+            id: check_delta
+          # Window must be open
           - condition: state
             entity_id: !input fenetre_boolean
             state: "on"
+          # Delta must be below threshold
+          - condition: template
+            value_template: >
+              {% set t_int = states(v_int) | float(none) %}
+              {% set t_ext = states(v_ext) | float(none) %}
+              {{ t_int is not none and t_ext is not none and (t_int - t_ext) < v_seuil | float(0.3) }}
+          # If tendance enabled: only alert if temperature is rising (door should be closed)
+          - condition: template
+            value_template: >
+              {% if v_tendance_on and v_tendance != '' %}
+                {{ is_state(v_tendance, 'on') or is_state(v_tendance, 'unavailable') }}
+              {% else %}
+                true
+              {% endif %}
         sequence:
           - action: notify.send_message
             target: !input notification_target
             data:
+              title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
               message: >
-                🪟 {{ v_room }} — ferme la fenêtre, il ne fait plus plus frais dehors
-                (delta : {{ states(v_sensor) }}°C)
-              title: "Surveillance fenêtres"
+                Plus utile de laisser ouvert : delta {{ v_delta }}°C
+                (intérieur {{ states(v_int) | round(1) }}°C /
+                extérieur {{ states(v_ext) | round(1) }}°C)
 
-      # ── Trigger: window opened → cut clim if running ──
+      # ── Window opened → cut clim if running ─────────────────────────────────
       - conditions:
           - condition: trigger
             id: fenetre_ouverte
@@ -173,7 +250,7 @@ actions:
             value_template: "{{ v_gestion_clim and v_clim != '' and v_memoire != '' }}"
         sequence:
           - choose:
-              # Clim is running → memorize and cut
+              # Clim is running → memorize then cut
               - conditions:
                   - condition: template
                     value_template: "{{ not is_state(v_clim, 'off') }}"
@@ -184,13 +261,13 @@ actions:
                   - action: climate.turn_off
                     target:
                       entity_id: "{{ v_clim }}"
-            # Clim already off → just reset memory
+            # Clim already off → reset memory
             default:
               - action: input_boolean.turn_off
                 target:
                   entity_id: "{{ v_memoire }}"
 
-      # ── Trigger: window closed → restore clim if it was running ──
+      # ── Window closed → restore clim if it was running ───────────────────────
       - conditions:
           - condition: trigger
             id: fenetre_fermee
