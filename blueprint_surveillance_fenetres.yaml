@@ -1,10 +1,10 @@
 blueprint:
   name: "Surveillance fenêtre — aération par pièce"
   description: >
-    Gère une fenêtre par pièce : détecte automatiquement les entités de la zone
-    (capteur température, tendance, fenêtre, clim) via area_entities().
-    Alerte quand il n'est plus utile de laisser la fenêtre ouverte, et
+    Gère une fenêtre par pièce : calcule le delta intérieur/extérieur,
+    alerte quand il n'est plus utile de laisser la fenêtre ouverte, et
     optionnellement coupe/rallume la climatisation.
+    Tous les capteurs sont sélectionnés explicitement.
     Instancier une fois par pièce.
   domain: automation
   author: Elwin
@@ -17,18 +17,26 @@ blueprint:
     piece:
       name: Pièce / Zone
       description: >
-        Zone Home Assistant à surveiller. Toutes les entités (capteur
-        température intérieure, tendance, fenêtre, clim) sont détectées
-        automatiquement parmi les entités assignées à cette zone.
+        Zone Home Assistant correspondant à la pièce surveillée.
+        Utilisée pour nommer la pièce dans les notifications.
       selector:
         area:
 
-    # ── 2. CAPTEUR EXTÉRIEUR ─────────────────────────────────────────────────
+    # ── 2. CAPTEURS TEMPÉRATURE ──────────────────────────────────────────────
+    sensor_interieur:
+      name: Capteur température intérieure
+      description: >
+        Capteur de température de la pièce.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+
     sensor_exterieur:
       name: Capteur température extérieure
       description: >
-        Capteur de température extérieure, non assigné à une zone.
-        Partagé entre toutes les instances du blueprint.
+        Capteur de température extérieure, partagé entre toutes les instances.
       selector:
         entity:
           filter:
@@ -164,6 +172,7 @@ blueprint:
 # ─────────────────────────────────────────────────────────────────────────────
 variables:
   v_area:             !input piece
+  v_int:              !input sensor_interieur
   v_ext:              !input sensor_exterieur
   v_seuil:            !input seuil_fermeture
   v_tendance_on:      !input utiliser_tendance
@@ -171,40 +180,17 @@ variables:
   v_clim:             !input clim_entity
   v_memoire:          !input memoire_clim
   v_fenetre:          !input fenetre_boolean
-  notification_target: !input notification_target
-
-  # Interior temperature sensor: first sensor with device_class=temperature in the area.
-  # If multiple sensors exist, their values are averaged.
-  v_int_sensors: >
-    {% set ns = namespace(sensors=[]) %}
-    {% for e in area_entities(v_area) %}
-      {% if e.startswith('sensor.')
-         and states[e] is defined
-         and is_state_attr(e, 'device_class', 'temperature') %}
-        {% set ns.sensors = ns.sensors + [e] %}
-      {% endif %}
-    {% endfor %}
-    {{ ns.sensors }}
-
-  # Averaged interior temperature (handles multiple sensors in same room)
-  v_int_temp: >
-    {% set sensors = v_int_sensors %}
-    {% if sensors | count == 0 %}
-      none
-    {% else %}
-      {{ sensors | map('states') | map('float', none)
-         | select('!=', none) | list | average | round(1) }}
-    {% endif %}
-
   v_tendance:         !input sensor_tendance
+  notification_target: !input notification_target
 
   # Computed delta interior - exterior
   v_delta: >
+    {% set t_int = states(v_int) | float(none) %}
     {% set t_ext = states(v_ext) | float(none) %}
-    {% if v_int_temp == 'none' or v_int_temp is none or t_ext is none %}
+    {% if t_int is none or t_ext is none %}
       none
     {% else %}
-      {{ (v_int_temp | float - t_ext) | round(1) }}
+      {{ (t_int - t_ext) | round(1) }}
     {% endif %}
 
   # Friendly area name for notifications
@@ -271,7 +257,7 @@ actions:
               title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
               message: >
                 Plus utile de laisser ouvert : delta {{ v_delta }}°C
-                (intérieur {{ v_int_temp }}°C / extérieur {{ states(v_ext) | round(1) }}°C)
+                (intérieur {{ states(v_int) | round(1) }}°C / extérieur {{ states(v_ext) | round(1) }}°C)
 
       # ── Window opened → cut clim if running ─────────────────────────────────
       - conditions:
