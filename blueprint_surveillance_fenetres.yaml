@@ -40,12 +40,28 @@ blueprint:
       name: Utiliser le capteur de tendance ?
       description: >
         Si activé, l'alerte ne se déclenche que si la température de la pièce
-        est en hausse (binary_sensor de tendance à "on").
-        Le binary_sensor est détecté automatiquement dans la zone
-        si son entity_id contient "tendance".
+        est en hausse, évitant les faux positifs quand la pièce se refroidit
+        naturellement.
       default: false
       selector:
         boolean:
+
+    sensor_tendance:
+      name: Capteur de tendance (binary_sensor)
+      description: >
+        binary_sensor indiquant si la température de la pièce est en hausse.
+        État "on" = température montante.
+
+        Si vous n'en avez pas encore : Paramètres → Appareils et services →
+        Ajouter une intégration → "Capteur de gradient" (Derivative).
+        Sélectionnez le capteur de température de la pièce, réglez
+        "Nombre minimum d'échantillons" à 5 et "Taux minimum de changement"
+        à 0.0006.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
 
     # ── 4. FENÊTRE ───────────────────────────────────────────────────────────
     fenetre_boolean:
@@ -90,12 +106,20 @@ blueprint:
 
     # ── 5. NOTIFICATION ──────────────────────────────────────────────────────
     notification_target:
-      name: Cible de notification
-      description: Entité ou groupe notify à utiliser pour les alertes.
+      name: Service de notification
+      description: >
+        Nom du service notify à appeler pour les alertes.
+        Saisir uniquement la partie après "notify." — exemples :
+
+          mobile_app_mon_telephone
+          group_de_notification_les_cheris
+          group_de_notification_admin
+
+        Les groupes définis dans configuration.yaml (notify: platform: group)
+        sont accessibles via leur name en snake_case.
+      default: "notify"
       selector:
-        target:
-          entity:
-            domain: notify
+        text:
 
     # ── 6. CLIMATISATION ─────────────────────────────────────────────────────
     gestion_clim:
@@ -134,15 +158,15 @@ blueprint:
 # VARIABLES — auto-detect entities from area via area_entities()
 # ─────────────────────────────────────────────────────────────────────────────
 variables:
-  v_area:         !input piece
-  v_ext:          !input sensor_exterieur
-  v_seuil:        !input seuil_fermeture
-  v_tendance_on:  !input utiliser_tendance
-  v_gestion_clim: !input gestion_clim
-  v_clim:         !input clim_entity
-  v_memoire:      !input memoire_clim
-  # Window boolean is also an explicit input (needed for triggers)
-  v_fenetre:      !input fenetre_boolean
+  v_area:             !input piece
+  v_ext:              !input sensor_exterieur
+  v_seuil:            !input seuil_fermeture
+  v_tendance_on:      !input utiliser_tendance
+  v_gestion_clim:     !input gestion_clim
+  v_clim:             !input clim_entity
+  v_memoire:          !input memoire_clim
+  v_fenetre:          !input fenetre_boolean
+  notification_target: !input notification_target
 
   # Interior temperature sensor: first sensor with device_class=temperature in the area.
   # If multiple sensors exist, their values are averaged.
@@ -167,15 +191,7 @@ variables:
          | select('!=', none) | list | average | round(1) }}
     {% endif %}
 
-  # First binary_sensor with "tendance" in entity_id within the area
-  v_tendance: >
-    {% set ns = namespace(found='') %}
-    {% for e in area_entities(v_area) %}
-      {% if e.startswith('binary_sensor.') and 'tendance' in e %}
-        {% set ns.found = e %}
-      {% endif %}
-    {% endfor %}
-    {{ ns.found }}
+  v_tendance:         !input sensor_tendance
 
   # Computed delta interior - exterior
   v_delta: >
@@ -244,8 +260,7 @@ actions:
                 true
               {% endif %}
         sequence:
-          - action: notify.send_message
-            target: !input notification_target
+          - action: "notify.{{ notification_target }}"
             data:
               title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
               message: >
