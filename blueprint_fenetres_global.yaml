@@ -17,7 +17,7 @@ blueprint:
       name: input_boolean — contrôle global
       description: >
         input_boolean global servant de bouton maître.
-        Créer : input_boolean.fenetres_global
+        Créer : input_boolean.etat_fenetres_global
       selector:
         entity:
           filter:

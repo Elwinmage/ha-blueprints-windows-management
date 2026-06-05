@@ -1,112 +1,61 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # CARTE MUSHROOM — Surveillance fenêtres par pièce + contrôle global
-# Utilise decluttering-card pour éviter la répétition par pièce
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Prérequis HACS :
 #   - lovelace-mushroom
-#   - decluttering-card
-#   - card-mod (pour l'opacité des fenêtres fermées)
+#   - auto-entities
+#   - card-mod
 #
-# Déclarer le template decluttering dans lovelace (configuration UI ou yaml) :
-#   Voir section "decluttering_templates" ci-dessous
+# Convention de nommage utilisée :
+#   input_boolean.etat_fenetre_<piece>   ex. input_boolean.etat_fenetre_salon
+#   sensor.aerer_<piece>                 ex. sensor.aerer_salon
 #
-# Variables du template chip_fenetre :
-#   fenetre  : entity_id de l'input_boolean fenêtre   (ex. input_boolean.fenetre_salon)
-#   delta    : entity_id du sensor delta temp          (ex. sensor.aerer_salon)
-#   label    : nom affiché dans le chip                (ex. Salon)
-#   seuil    : seuil d'alerte en °C                   (défaut 0.3)
+#   La dérivation du sensor delta se fait en remplaçant
+#   "etat_fenetre_" par "aerer_" dans l'entity_id.
+#
+# Entités déclarées :
+#   input_boolean.etat_fenetre_salon
+#   input_boolean.etat_fenetre_bureau
+#   input_boolean.etat_fenetre_chambre_d_amis
+#   input_boolean.etat_fenetre_salle_de_sport
+#   input_boolean.etat_fenetres_global
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# ── ÉTAPE 1 : déclarer le template dans lovelace (yaml ou UI) ─────────────────
-# À ajouter dans configuration.yaml (mode yaml) ou dans l'éditeur de ressources
-# Lovelace > Templates decluttering :
-
-decluttering_templates:
-  chip_fenetre:
-    default:
-      - seuil: 0.3
-    card:
-      type: custom:mushroom-chips-card
-      chips:
-        - type: template
-          entity: "[[fenetre]]"
-          icon: >
-            {{ 'mdi:window-open' if is_state('[[fenetre]]', 'on')
-               else 'mdi:window-closed-variant' }}
-          icon_color: >
-            {% if is_state('[[fenetre]]', 'off') %}grey
-            {% else %}
-              {% set d = states('[[delta]]') | float(0) %}
-              {% if d > [[seuil]] %}blue{% elif d < 0 %}red{% else %}grey{% endif %}
-            {% endif %}
-          content: >
-            [[label]]
-            {%- if is_state('[[fenetre]]', 'on') %}
-              · {% set d = states('[[delta]]') | float(0) %}
-              {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C
-            {%- endif %}
-          tap_action:
-            action: call-service
-            service: input_boolean.toggle
-            service_data:
-              entity_id: "[[fenetre]]"
-          hold_action:
-            action: more-info
-          card_mod:
-            style: |
-              :host {
-                {% if is_state('[[fenetre]]', 'off') %}
-                  opacity: 0.45;
-                {% endif %}
-              }
-
-# ── ÉTAPE 2 : la carte dashboard ─────────────────────────────────────────────
 
 type: vertical-stack
 cards:
 
-  # -- Chip global + chips pièces -------------------------------------------
+  # ── CHIP GLOBAL ─────────────────────────────────────────────────────────────
   - type: custom:mushroom-chips-card
     chips:
-
-      # Bouton global ouvrir/fermer tout
       - type: template
-        entity: input_boolean.fenetres_global
+        entity: input_boolean.etat_fenetres_global
         icon: >
-          {% set fenetres = [
-            'input_boolean.fenetre_salon',
-            'input_boolean.fenetre_chambre_parentale',
-            'input_boolean.fenetre_bureau',
-            'input_boolean.fenetre_chambre_amis',
-            'input_boolean.fenetre_salle_de_sport'
-          ] %}
-          {% if fenetres | select('is_state', 'on') | list | count == 0 %}
+          {% set fenetres = states.input_boolean
+            | selectattr('entity_id', 'search', 'etat_fenetre_')
+            | rejectattr('entity_id', 'search', 'etat_fenetres_')
+            | list %}
+          {% if fenetres | selectattr('state', 'eq', 'on') | list | count == 0 %}
             mdi:window-closed-variant
           {% else %}
             mdi:window-open
           {% endif %}
         icon_color: >
-          {% set fenetres = [
-            'input_boolean.fenetre_salon',
-            'input_boolean.fenetre_chambre_parentale',
-            'input_boolean.fenetre_bureau',
-            'input_boolean.fenetre_chambre_amis',
-            'input_boolean.fenetre_salle_de_sport'
-          ] %}
-          {% set nb = fenetres | select('is_state', 'on') | list | count %}
+          {% set fenetres = states.input_boolean
+            | selectattr('entity_id', 'search', 'etat_fenetre_')
+            | rejectattr('entity_id', 'search', 'etat_fenetres_')
+            | list %}
+          {% set nb = fenetres | selectattr('state', 'eq', 'on') | list | count %}
+          {% set total = fenetres | count %}
           {% if nb == 0 %}grey
-          {% elif nb == fenetres | count %}green
+          {% elif nb == total %}green
           {% else %}orange{% endif %}
         content: >
-          {% set fenetres = [
-            'input_boolean.fenetre_salon',
-            'input_boolean.fenetre_chambre_parentale',
-            'input_boolean.fenetre_bureau',
-            'input_boolean.fenetre_chambre_amis',
-            'input_boolean.fenetre_salle_de_sport'
-          ] %}
-          {% set nb = fenetres | select('is_state', 'on') | list | count %}
+          {% set fenetres = states.input_boolean
+            | selectattr('entity_id', 'search', 'etat_fenetre_')
+            | rejectattr('entity_id', 'search', 'etat_fenetres_')
+            | list %}
+          {% set nb = fenetres | selectattr('state', 'eq', 'on') | list | count %}
           {% set total = fenetres | count %}
           {% if nb == 0 %}Tout fermé
           {% elif nb == total %}Tout ouvert
@@ -115,44 +64,63 @@ cards:
           action: call-service
           service: input_boolean.toggle
           service_data:
-            entity_id: input_boolean.fenetres_global
+            entity_id: input_boolean.etat_fenetres_global
         hold_action:
           action: more-info
 
-      - type: spacer
-
-  # -- Chips individuels via decluttering ------------------------------------
-  - type: custom:decluttering-card
-    template: chip_fenetre
-    variables:
-      - fenetre: input_boolean.fenetre_salon
-      - delta: sensor.aerer_salon
-      - label: Salon
-
-  - type: custom:decluttering-card
-    template: chip_fenetre
-    variables:
-      - fenetre: input_boolean.fenetre_chambre_parentale
-      - delta: sensor.aerer_chambre_parentale
-      - label: Ch. Parentale
-
-  - type: custom:decluttering-card
-    template: chip_fenetre
-    variables:
-      - fenetre: input_boolean.fenetre_bureau
-      - delta: sensor.aerer_bureau
-      - label: Bureau
-
-  - type: custom:decluttering-card
-    template: chip_fenetre
-    variables:
-      - fenetre: input_boolean.fenetre_chambre_amis
-      - delta: sensor.aerer_chambre_d_amis
-      - label: Ch. Amis
-
-  - type: custom:decluttering-card
-    template: chip_fenetre
-    variables:
-      - fenetre: input_boolean.fenetre_salle_de_sport
-      - delta: sensor.aerer_salle_de_sport
-      - label: Sport
+  # ── CHIPS INDIVIDUELS via auto-entities ─────────────────────────────────────
+  - type: custom:auto-entities
+    card:
+      type: custom:mushroom-chips-card
+    card_param: chips
+    filter:
+      include:
+        - domain: input_boolean
+          entity_id: "*etat_fenetre_*"
+          options:
+            type: template
+            icon: >
+              {% set e = config.entity %}
+              {{ 'mdi:window-open' if is_state(e, 'on')
+                 else 'mdi:window-closed-variant' }}
+            icon_color: >
+              {% set e = config.entity %}
+              {% set delta_id = 'sensor.aerer_' ~ e.split('etat_fenetre_')[1] %}
+              {% if is_state(e, 'off') %}grey
+              {% else %}
+                {% set d = states(delta_id) | float(0) %}
+                {% if d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{% endif %}
+              {% endif %}
+            content: >
+              {% set e = config.entity %}
+              {% set delta_id = 'sensor.aerer_' ~ e.split('etat_fenetre_')[1] %}
+              {% set label = state_attr(e, 'friendly_name')
+                             | replace('Etat fenetre ', '')
+                             | replace('Etat fenêtre ', '')
+                             | replace('Etat Fenetre ', '')
+                             | replace('Etat Fenêtre ', '')
+                             | title %}
+              {{ label }}
+              {%- if is_state(e, 'on') %}
+                {% set d = states(delta_id) | float(0) %}
+                · {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C
+              {%- endif %}
+            tap_action:
+              action: call-service
+              service: input_boolean.toggle
+              service_data:
+                entity_id: "{{ config.entity }}"
+            hold_action:
+              action: more-info
+            card_mod:
+              style: >
+                :host {
+                  {% if is_state(config.entity, 'off') %}
+                    opacity: 0.45;
+                  {% endif %}
+                }
+      exclude:
+        - entity_id: "*etat_fenetres_*"
+        - entity_id: "*etat_clim_*"
+    sort:
+      method: friendly_name
