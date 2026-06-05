@@ -1,182 +1,218 @@
 # ═══════════════════════════════════════════════════════
 # CARTE MUSHROOM — Surveillance fenêtres par pièce
+# + bouton global ouvrir/fermer tout
 # ═══════════════════════════════════════════════════════
 #
-# Prérequis HACS :
-#   - mushroom (lovelace-mushroom)
+# Prérequis HACS : lovelace-mushroom
 #
-# Logique couleur du chip :
-#   delta > seuil  → bleu  (pièce plus chaude, intéressant d'aérer)
-#   delta < 0      → rouge (pièce plus froide que dehors, ferme !)
-#   entre les deux → gris  (neutre)
-#   fenêtre fermée → pas de couleur (chip grisé)
+# Chip global (premier chip) :
+#   - Toutes fermées  → icône mdi:window-closed-variant, gris
+#   - Partiellement   → icône mdi:window-open, orange
+#   - Toutes ouvertes → icône mdi:window-open, vert
+#   - Tap             → toggle input_boolean.fenetres_global
 #
-# Icône :
-#   mdi:window-open  → fenêtre ouverte (input_boolean ON)
-#   mdi:window-closed-variant → fenêtre fermée (input_boolean OFF)
-#
-# Tap action : toggle l'input_boolean (ouvre/ferme manuellement)
+# Chips individuels :
+#   delta > seuil → bleu  (utile d'aérer)
+#   delta < 0     → rouge (plus frais dedans, fermer)
+#   neutre        → gris
+#   fermée        → chip atténué
+#   Tap           → toggle l'input_boolean de la pièce
+#   Hold          → more-info
 # ═══════════════════════════════════════════════════════
 
 type: custom:mushroom-chips-card
 chips:
 
-  # ── SALON ──────────────────────────────────────────
+  # ── BOUTON GLOBAL ─────────────────────────────────────────────────────────
+  - type: template
+    entity: input_boolean.fenetres_global
+    icon: >
+      {% set fenetres = [
+        'input_boolean.fenetre_salon',
+        'input_boolean.fenetre_chambre_parentale',
+        'input_boolean.fenetre_bureau',
+        'input_boolean.fenetre_chambre_amis',
+        'input_boolean.fenetre_salle_de_sport'
+      ] %}
+      {% set nb_ouvertes = fenetres | select('is_state', 'on') | list | count %}
+      {% if nb_ouvertes == 0 %}
+        mdi:window-closed-variant
+      {% else %}
+        mdi:window-open
+      {% endif %}
+    icon_color: >
+      {% set fenetres = [
+        'input_boolean.fenetre_salon',
+        'input_boolean.fenetre_chambre_parentale',
+        'input_boolean.fenetre_bureau',
+        'input_boolean.fenetre_chambre_amis',
+        'input_boolean.fenetre_salle_de_sport'
+      ] %}
+      {% set nb_ouvertes = fenetres | select('is_state', 'on') | list | count %}
+      {% set total = fenetres | count %}
+      {% if nb_ouvertes == 0 %}
+        grey
+      {% elif nb_ouvertes == total %}
+        green
+      {% else %}
+        orange
+      {% endif %}
+    content: >
+      {% set fenetres = [
+        'input_boolean.fenetre_salon',
+        'input_boolean.fenetre_chambre_parentale',
+        'input_boolean.fenetre_bureau',
+        'input_boolean.fenetre_chambre_amis',
+        'input_boolean.fenetre_salle_de_sport'
+      ] %}
+      {% set nb_ouvertes = fenetres | select('is_state', 'on') | list | count %}
+      {% set total = fenetres | count %}
+      {% if nb_ouvertes == 0 %}
+        Tout fermé
+      {% elif nb_ouvertes == total %}
+        Tout ouvert
+      {% else %}
+        {{ nb_ouvertes }}/{{ total }} ouvertes
+      {% endif %}
+    tap_action:
+      action: toggle
+    hold_action:
+      action: more-info
+    chip_style: >
+      border: 1px solid var(--divider-color);
+
+  # ── SÉPARATEUR ────────────────────────────────────────────────────────────
+  - type: spacer
+
+  # ── SALON ─────────────────────────────────────────────────────────────────
   - type: template
     entity: input_boolean.fenetre_salon
-    # Icon changes with window state
     icon: >
-      {% if is_state('input_boolean.fenetre_salon', 'on') %}
-        mdi:window-open
-      {% else %}
-        mdi:window-closed-variant
-      {% endif %}
-    # Color reflects thermal interest (only when open)
+      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_salon', 'on')
+         else 'mdi:window-closed-variant' }}
     icon_color: >
       {% if is_state('input_boolean.fenetre_salon', 'off') %}
-        disabled
+        grey
       {% else %}
         {% set delta = states('sensor.aerer_salon') | float(0) %}
-        {% if delta > 0.3 %}
-          blue
-        {% elif delta < 0 %}
-          red
-        {% else %}
-          grey
-        {% endif %}
+        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
       {% endif %}
     content: >
       Salon
-      {% if is_state('input_boolean.fenetre_salon', 'on') %}
+      {%- if is_state('input_boolean.fenetre_salon', 'on') %}
         · {{ states('sensor.aerer_salon') }}°
+      {%- endif %}
+    style: >
+      {% if is_state('input_boolean.fenetre_salon', 'off') %}
+        opacity: 0.45;
       {% endif %}
     tap_action:
       action: toggle
     hold_action:
       action: more-info
 
-  # ── CHAMBRE PARENTALE ──────────────────────────────
+  # ── CHAMBRE PARENTALE ─────────────────────────────────────────────────────
   - type: template
     entity: input_boolean.fenetre_chambre_parentale
     icon: >
-      {% if is_state('input_boolean.fenetre_chambre_parentale', 'on') %}
-        mdi:window-open
-      {% else %}
-        mdi:window-closed-variant
-      {% endif %}
+      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_chambre_parentale', 'on')
+         else 'mdi:window-closed-variant' }}
     icon_color: >
       {% if is_state('input_boolean.fenetre_chambre_parentale', 'off') %}
-        disabled
+        grey
       {% else %}
         {% set delta = states('sensor.aerer_chambre_parentale') | float(0) %}
-        {% if delta > 0.3 %}
-          blue
-        {% elif delta < 0 %}
-          red
-        {% else %}
-          grey
-        {% endif %}
+        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
       {% endif %}
     content: >
       Ch. Parentale
-      {% if is_state('input_boolean.fenetre_chambre_parentale', 'on') %}
+      {%- if is_state('input_boolean.fenetre_chambre_parentale', 'on') %}
         · {{ states('sensor.aerer_chambre_parentale') }}°
+      {%- endif %}
+    style: >
+      {% if is_state('input_boolean.fenetre_chambre_parentale', 'off') %}
+        opacity: 0.45;
       {% endif %}
     tap_action:
       action: toggle
     hold_action:
       action: more-info
 
-  # ── BUREAU ─────────────────────────────────────────
+  # ── BUREAU ────────────────────────────────────────────────────────────────
   - type: template
     entity: input_boolean.fenetre_bureau
     icon: >
-      {% if is_state('input_boolean.fenetre_bureau', 'on') %}
-        mdi:window-open
-      {% else %}
-        mdi:window-closed-variant
-      {% endif %}
+      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_bureau', 'on')
+         else 'mdi:window-closed-variant' }}
     icon_color: >
       {% if is_state('input_boolean.fenetre_bureau', 'off') %}
-        disabled
+        grey
       {% else %}
         {% set delta = states('sensor.aerer_bureau') | float(0) %}
-        {% if delta > 0.3 %}
-          blue
-        {% elif delta < 0 %}
-          red
-        {% else %}
-          grey
-        {% endif %}
+        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
       {% endif %}
     content: >
       Bureau
-      {% if is_state('input_boolean.fenetre_bureau', 'on') %}
+      {%- if is_state('input_boolean.fenetre_bureau', 'on') %}
         · {{ states('sensor.aerer_bureau') }}°
+      {%- endif %}
+    style: >
+      {% if is_state('input_boolean.fenetre_bureau', 'off') %}
+        opacity: 0.45;
       {% endif %}
     tap_action:
       action: toggle
     hold_action:
       action: more-info
 
-  # ── CHAMBRE D'AMIS ─────────────────────────────────
+  # ── CHAMBRE D'AMIS ────────────────────────────────────────────────────────
   - type: template
     entity: input_boolean.fenetre_chambre_amis
     icon: >
-      {% if is_state('input_boolean.fenetre_chambre_amis', 'on') %}
-        mdi:window-open
-      {% else %}
-        mdi:window-closed-variant
-      {% endif %}
+      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_chambre_amis', 'on')
+         else 'mdi:window-closed-variant' }}
     icon_color: >
       {% if is_state('input_boolean.fenetre_chambre_amis', 'off') %}
-        disabled
+        grey
       {% else %}
         {% set delta = states('sensor.aerer_chambre_d_amis') | float(0) %}
-        {% if delta > 0.3 %}
-          blue
-        {% elif delta < 0 %}
-          red
-        {% else %}
-          grey
-        {% endif %}
+        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
       {% endif %}
     content: >
       Ch. Amis
-      {% if is_state('input_boolean.fenetre_chambre_amis', 'on') %}
+      {%- if is_state('input_boolean.fenetre_chambre_amis', 'on') %}
         · {{ states('sensor.aerer_chambre_d_amis') }}°
+      {%- endif %}
+    style: >
+      {% if is_state('input_boolean.fenetre_chambre_amis', 'off') %}
+        opacity: 0.45;
       {% endif %}
     tap_action:
       action: toggle
     hold_action:
       action: more-info
 
-  # ── SALLE DE SPORT ─────────────────────────────────
+  # ── SALLE DE SPORT ────────────────────────────────────────────────────────
   - type: template
     entity: input_boolean.fenetre_salle_de_sport
     icon: >
-      {% if is_state('input_boolean.fenetre_salle_de_sport', 'on') %}
-        mdi:window-open
-      {% else %}
-        mdi:window-closed-variant
-      {% endif %}
+      {{ 'mdi:window-open' if is_state('input_boolean.fenetre_salle_de_sport', 'on')
+         else 'mdi:window-closed-variant' }}
     icon_color: >
       {% if is_state('input_boolean.fenetre_salle_de_sport', 'off') %}
-        disabled
+        grey
       {% else %}
         {% set delta = states('sensor.aerer_salle_de_sport') | float(0) %}
-        {% if delta > 0.3 %}
-          blue
-        {% elif delta < 0 %}
-          red
-        {% else %}
-          grey
-        {% endif %}
+        {% if delta > 0.3 %}blue{% elif delta < 0 %}red{% else %}grey{% endif %}
       {% endif %}
     content: >
       Sport
-      {% if is_state('input_boolean.fenetre_salle_de_sport', 'on') %}
+      {%- if is_state('input_boolean.fenetre_salle_de_sport', 'on') %}
         · {{ states('sensor.aerer_salle_de_sport') }}°
+      {%- endif %}
+    style: >
+      {% if is_state('input_boolean.fenetre_salle_de_sport', 'off') %}
+        opacity: 0.45;
       {% endif %}
     tap_action:
       action: toggle

@@ -1,0 +1,131 @@
+blueprint:
+  name: "Fenêtres — contrôle global"
+  description: >
+    Blueprint orchestrateur : un input_boolean global pilote l'ensemble des
+    fenêtres déclarées. Toggle global = ouvre toutes / ferme toutes.
+    L'état global se met aussi à jour automatiquement quand une fenêtre
+    individuelle est basculée (toutes fermées → global OFF, au moins une ouverte → global ON).
+  domain: automation
+  author: Elwin
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+
+    # ── BOUTON GLOBAL ────────────────────────────────────────────────────────
+    fenetre_globale:
+      name: input_boolean — contrôle global
+      description: >
+        input_boolean global servant de bouton maître.
+        Créer : input_boolean.fenetres_global
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+
+    # ── LISTE DES FENÊTRES ───────────────────────────────────────────────────
+    fenetres:
+      name: Fenêtres à piloter
+      description: >
+        Liste de tous les input_boolean représentant les fenêtres individuelles
+        (une par pièce, instanciées via le blueprint "Surveillance fenêtre").
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+          multiple: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLES
+# ─────────────────────────────────────────────────────────────────────────────
+variables:
+  v_global:   !input fenetre_globale
+  v_fenetres: !input fenetres
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGERS
+# ─────────────────────────────────────────────────────────────────────────────
+triggers:
+
+  # Global toggle → propagate to all individual windows
+  - trigger: state
+    id: global_on
+    entity_id: !input fenetre_globale
+    to: "on"
+
+  - trigger: state
+    id: global_off
+    entity_id: !input fenetre_globale
+    to: "off"
+
+  # Any individual window changed → sync global state
+  - trigger: state
+    id: individuelle_changed
+    entity_id: !input fenetres
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+conditions: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+actions:
+  - choose:
+
+      # ── Global turned ON → open all windows ─────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: global_on
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input fenetres
+
+      # ── Global turned OFF → close all windows ───────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: global_off
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input fenetres
+
+      # ── Individual window changed → sync global ──────────────────────────────
+      # If ALL windows are off → turn global off
+      # If at least one is on → turn global on
+      # Avoid loop: only act if global state doesn't already match
+      - conditions:
+          - condition: trigger
+            id: individuelle_changed
+        sequence:
+          - choose:
+              # All windows closed → global OFF
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ v_fenetres | select('is_state', 'on') | list | count == 0 }}
+                  - condition: state
+                    entity_id: !input fenetre_globale
+                    state: "on"
+                sequence:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: !input fenetre_globale
+
+              # At least one window open → global ON
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ v_fenetres | select('is_state', 'on') | list | count > 0 }}
+                  - condition: state
+                    entity_id: !input fenetre_globale
+                    state: "off"
+                sequence:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: !input fenetre_globale
+
+mode: single
+max_exceeded: silent

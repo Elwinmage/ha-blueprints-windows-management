@@ -1,11 +1,11 @@
 blueprint:
   name: "Surveillance fenêtre — aération par pièce"
   description: >
-    Gère une fenêtre par pièce : calcule le delta intérieur/extérieur, alerte
-    quand il n'est plus utile de laisser la fenêtre ouverte, et optionnellement
-    coupe/rallume la climatisation selon l'état de la fenêtre.
-    Les entités (capteur intérieur, tendance, fenêtre, clim) sont filtrées
-    sur la pièce sélectionnée.
+    Gère une fenêtre par pièce : détecte automatiquement les entités de la zone
+    (capteur température, tendance, fenêtre, clim) via area_entities().
+    Alerte quand il n'est plus utile de laisser la fenêtre ouverte, et
+    optionnellement coupe/rallume la climatisation.
+    Instancier une fois par pièce.
   domain: automation
   author: Elwin
   homeassistant:
@@ -15,28 +15,19 @@ blueprint:
 
     # ── 1. PIÈCE ────────────────────────────────────────────────────────────
     piece:
-      name: Pièce
+      name: Pièce / Zone
       description: >
-        La pièce / zone Home Assistant à surveiller.
-        Les entités ci-dessous seront filtrées sur cette zone.
+        Zone Home Assistant à surveiller. Toutes les entités (capteur
+        température intérieure, tendance, fenêtre, clim) sont détectées
+        automatiquement parmi les entités assignées à cette zone.
       selector:
         area:
 
-    # ── 2. CAPTEURS TEMPÉRATURE ─────────────────────────────────────────────
-    sensor_interieur:
-      name: Capteur température intérieure
-      description: Capteur de température dans la pièce sélectionnée.
-      selector:
-        entity:
-          filter:
-            - domain: sensor
-              device_class: temperature
-          area: !input piece
-
+    # ── 2. CAPTEUR EXTÉRIEUR ─────────────────────────────────────────────────
     sensor_exterieur:
       name: Capteur température extérieure
       description: >
-        Capteur de température extérieure (non attaché à une pièce).
+        Capteur de température extérieure, non assigné à une zone.
         Partagé entre toutes les instances du blueprint.
       selector:
         entity:
@@ -44,46 +35,24 @@ blueprint:
             - domain: sensor
               device_class: temperature
 
-    # ── 3. TENDANCE (optionnel) ──────────────────────────────────────────────
+    # ── 3. TENDANCE ──────────────────────────────────────────────────────────
     utiliser_tendance:
       name: Utiliser le capteur de tendance ?
       description: >
-        Si activé, le blueprint surveille aussi le binary_sensor de tendance
-        pour affiner l'alerte (alerte seulement si tendance montante).
+        Si activé, l'alerte ne se déclenche que si la température de la pièce
+        est en hausse (binary_sensor de tendance à "on").
+        Le binary_sensor est détecté automatiquement dans la zone
+        si son entity_id contient "tendance".
       default: false
       selector:
         boolean:
 
-    sensor_tendance:
-      name: Capteur de tendance de température (optionnel)
-      description: >
-        binary_sensor indiquant si la température de la pièce est en hausse.
-        État "on" = température montante. Filtré sur la pièce sélectionnée.
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: binary_sensor
-          area: !input piece
-
-    # ── 4. FENÊTRE ──────────────────────────────────────────────────────────
-    fenetre_boolean:
-      name: État de la fenêtre (input_boolean)
-      description: >
-        input_boolean représentant l'état ouvert/fermé de la fenêtre.
-        Filtré sur la pièce sélectionnée.
-      selector:
-        entity:
-          filter:
-            - domain: input_boolean
-          area: !input piece
-
-    # ── 5. SEUIL & DURÉE ────────────────────────────────────────────────────
+    # ── 4. SEUIL & FRÉQUENCE ─────────────────────────────────────────────────
     seuil_fermeture:
       name: Seuil de fermeture (°C)
       description: >
-        Alerte envoyée quand le delta (intérieur − extérieur) passe sous ce seuil
-        pendant la durée définie. Défaut : 0.3 °C
+        Alerte envoyée quand le delta (intérieur − extérieur) passe sous ce seuil.
+        Défaut : 0.3 °C
       default: 0.3
       selector:
         number:
@@ -94,10 +63,10 @@ blueprint:
           mode: slider
 
     duree_avant_alerte:
-      name: Durée avant alerte (minutes)
+      name: Fréquence de vérification (minutes)
       description: >
-        Le delta doit rester sous le seuil pendant cette durée avant d'envoyer
-        la notification.
+        Le delta est réévalué toutes les N minutes quand la fenêtre est ouverte.
+        Défaut : 2 min
       default: 2
       selector:
         number:
@@ -107,97 +76,153 @@ blueprint:
           unit_of_measurement: min
           mode: slider
 
-    # ── 6. NOTIFICATION ─────────────────────────────────────────────────────
+    # ── 5. NOTIFICATION ──────────────────────────────────────────────────────
     notification_target:
       name: Cible de notification
-      description: >
-        Entité ou groupe notify à utiliser pour les alertes.
+      description: Entité ou groupe notify à utiliser pour les alertes.
       selector:
         target:
           entity:
             domain: notify
 
-    # ── 7. CLIMATISATION (optionnel) ────────────────────────────────────────
+    # ── 6. CLIMATISATION ─────────────────────────────────────────────────────
     gestion_clim:
       name: Gérer la climatisation ?
       description: >
         Si activé, coupe la clim quand la fenêtre est ouverte et la rallume
         (si elle tournait) quand la fenêtre est refermée.
+        L'entité climate est détectée automatiquement dans la zone.
       default: false
       selector:
         boolean:
-
-    clim_entity:
-      name: Entité climatisation (optionnel)
-      description: >
-        Entité climate à couper/rallumer selon l'état de la fenêtre.
-        Filtrée sur la pièce sélectionnée.
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: climate
-          area: !input piece
 
     memoire_clim:
       name: Mémoire état clim (input_boolean, optionnel)
       description: >
         input_boolean dédié pour mémoriser si la clim tournait avant l'ouverture.
-        Créer un input_boolean par pièce (ex. input_boolean.clim_salon_etait_allumee).
-        Filtré sur la pièce sélectionnée.
+        Créer un input_boolean par pièce (ex. input_boolean.clim_salon_etait_allumee)
+        et l'assigner à la zone. Il sera détecté automatiquement si son
+        entity_id contient "memoire" ou "etait".
       default: ""
       selector:
         entity:
           filter:
             - domain: input_boolean
-          area: !input piece
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VARIABLES
+# VARIABLES — auto-detect entities from area via area_entities()
 # ─────────────────────────────────────────────────────────────────────────────
 variables:
-  v_int:            !input sensor_interieur
-  v_ext:            !input sensor_exterieur
-  v_fenetre:        !input fenetre_boolean
-  v_seuil:          !input seuil_fermeture
-  v_tendance_on:    !input utiliser_tendance
-  v_tendance:       !input sensor_tendance
-  v_gestion_clim:   !input gestion_clim
-  v_clim:           !input clim_entity
-  v_memoire:        !input memoire_clim
-  # Computed delta — used in notification message
-  v_delta: >
-    {% set t_int = states(v_int) | float(none) %}
-    {% set t_ext = states(v_ext) | float(none) %}
-    {% if t_int is not none and t_ext is not none %}
-      {{ (t_int - t_ext) | round(1) }}
-    {% else %}
+  v_area:         !input piece
+  v_ext:          !input sensor_exterieur
+  v_seuil:        !input seuil_fermeture
+  v_tendance_on:  !input utiliser_tendance
+  v_gestion_clim: !input gestion_clim
+  v_memoire:      !input memoire_clim
+
+  # Interior temperature sensor: first sensor with device_class=temperature in the area.
+  # If multiple sensors exist, their values are averaged.
+  v_int_sensors: >
+    {% set ns = namespace(sensors=[]) %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('sensor.')
+         and states[e] is defined
+         and is_state_attr(e, 'device_class', 'temperature') %}
+        {% set ns.sensors = ns.sensors + [e] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.sensors }}
+
+  # Averaged interior temperature (handles multiple sensors in same room)
+  v_int_temp: >
+    {% set sensors = v_int_sensors %}
+    {% if sensors | count == 0 %}
       none
+    {% else %}
+      {{ sensors | map('states') | map('float', none)
+         | select('!=', none) | list | average | round(1) }}
     {% endif %}
+
+  # First binary_sensor with "tendance" in entity_id within the area
+  v_tendance: >
+    {% set ns = namespace(found='') %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('binary_sensor.') and 'tendance' in e %}
+        {% set ns.found = e %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.found }}
+
+  # First input_boolean with "fenetre" in entity_id within the area
+  v_fenetre: >
+    {% set ns = namespace(found='') %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('input_boolean.') and 'fenetre' in e %}
+        {% set ns.found = e %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.found }}
+
+  # First climate entity within the area
+  v_clim: >
+    {% set ns = namespace(found='') %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('climate.') %}
+        {% set ns.found = e %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.found }}
+
+  # Computed delta interior - exterior
+  v_delta: >
+    {% set t_ext = states(v_ext) | float(none) %}
+    {% if v_int_temp == 'none' or v_int_temp is none or t_ext is none %}
+      none
+    {% else %}
+      {{ (v_int_temp | float - t_ext) | round(1) }}
+    {% endif %}
+
   # Friendly area name for notifications
   v_piece_label: >
-    {{ area_name(v_fenetre) | default('la pièce') }}
+    {{ area_name(v_area) | default('la pièce') }}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRIGGERS
 # ─────────────────────────────────────────────────────────────────────────────
 triggers:
-  # Periodic check: re-evaluate delta every minute when window is open
+
+  # Periodic delta check
   - trigger: time_pattern
     id: check_delta
-    minutes: "/1"
+    minutes: !input duree_avant_alerte
 
-  # Window opened
-  - trigger: state
+  # Window opened (detected via variable — re-evaluated at trigger time)
+  - trigger: template
     id: fenetre_ouverte
-    entity_id: !input fenetre_boolean
-    to: "on"
+    value_template: >
+      {% set ns = namespace(found='') %}
+      {% for e in area_entities(!input piece) %}
+        {% if e.startswith('input_boolean.') and 'fenetre' in e %}
+          {% set ns.found = e %}
+        {% endif %}
+      {% endfor %}
+      {{ is_state(ns.found, 'on') }}
+    for:
+      seconds: 1
 
   # Window closed
-  - trigger: state
+  - trigger: template
     id: fenetre_fermee
-    entity_id: !input fenetre_boolean
-    to: "off"
+    value_template: >
+      {% set ns = namespace(found='') %}
+      {% for e in area_entities(!input piece) %}
+        {% if e.startswith('input_boolean.') and 'fenetre' in e %}
+          {% set ns.found = e %}
+        {% endif %}
+      {% endfor %}
+      {{ is_state(ns.found, 'off') }}
+    for:
+      seconds: 1
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONDITIONS
@@ -215,20 +240,18 @@ actions:
           - condition: trigger
             id: check_delta
           # Window must be open
-          - condition: state
-            entity_id: !input fenetre_boolean
-            state: "on"
-          # Delta must be below threshold
+          - condition: template
+            value_template: "{{ v_fenetre != '' and is_state(v_fenetre, 'on') }}"
+          # Delta must be computable and below threshold
           - condition: template
             value_template: >
-              {% set t_int = states(v_int) | float(none) %}
-              {% set t_ext = states(v_ext) | float(none) %}
-              {{ t_int is not none and t_ext is not none and (t_int - t_ext) < v_seuil | float(0.3) }}
-          # If tendance enabled: only alert if temperature is rising (door should be closed)
+              {{ v_delta != 'none' and v_delta is not none
+                 and v_delta | float < v_seuil | float }}
+          # If tendance enabled: only alert when temperature is rising
           - condition: template
             value_template: >
               {% if v_tendance_on and v_tendance != '' %}
-                {{ is_state(v_tendance, 'on') or is_state(v_tendance, 'unavailable') }}
+                {{ is_state(v_tendance, 'on') }}
               {% else %}
                 true
               {% endif %}
@@ -239,8 +262,7 @@ actions:
               title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
               message: >
                 Plus utile de laisser ouvert : delta {{ v_delta }}°C
-                (intérieur {{ states(v_int) | round(1) }}°C /
-                extérieur {{ states(v_ext) | round(1) }}°C)
+                (intérieur {{ v_int_temp }}°C / extérieur {{ states(v_ext) | round(1) }}°C)
 
       # ── Window opened → cut clim if running ─────────────────────────────────
       - conditions:
