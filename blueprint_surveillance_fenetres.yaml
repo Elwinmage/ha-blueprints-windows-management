@@ -10,9 +10,7 @@ blueprint:
   author: Elwin
   homeassistant:
     min_version: "2024.6.0"
-
   input:
-
     # ── 1. PIÈCE ────────────────────────────────────────────────────────────
     piece:
       name: Pièce / Zone
@@ -21,7 +19,6 @@ blueprint:
         Utilisée pour nommer la pièce dans les notifications.
       selector:
         area:
-
     # ── 2. CAPTEURS TEMPÉRATURE ──────────────────────────────────────────────
     sensor_interieur:
       name: Capteur température intérieure
@@ -32,7 +29,6 @@ blueprint:
           filter:
             - domain: sensor
               device_class: temperature
-
     sensor_exterieur:
       name: Capteur température extérieure
       description: >
@@ -42,7 +38,6 @@ blueprint:
           filter:
             - domain: sensor
               device_class: temperature
-
     # ── 3. TENDANCE ──────────────────────────────────────────────────────────
     utiliser_tendance:
       name: Utiliser le capteur de tendance ?
@@ -53,18 +48,15 @@ blueprint:
       default: false
       selector:
         boolean:
-
     sensor_tendance:
       name: Capteur de tendance (binary_sensor)
       description: >
         binary_sensor indiquant la tendance de température de la pièce.
         État "on" = température montante, "off" = descendante ou stable.
-
         L'alerte est envoyée uniquement si la tendance est "off" (descendante
         ou stable) — si la pièce se refroidit déjà toute seule, inutile d'alerter.
         Si la tendance est "on" (montante) et le delta est faible, l'alerte
         part quand même car la pièce va continuer à se réchauffer.
-
         Si vous n'en avez pas encore : Paramètres → Appareils et services →
         Ajouter une intégration → "Capteur de gradient" (Derivative).
         Sélectionnez le capteur de température de la pièce, réglez
@@ -75,7 +67,6 @@ blueprint:
         entity:
           filter:
             - domain: binary_sensor
-
     # ── 4. FENÊTRE ───────────────────────────────────────────────────────────
     fenetre_boolean:
       name: État de la fenêtre (input_boolean)
@@ -87,7 +78,6 @@ blueprint:
         entity:
           filter:
             - domain: input_boolean
-
     # ── 5. SEUIL & FRÉQUENCE ─────────────────────────────────────────────────
     seuil_fermeture:
       name: Seuil de fermeture (°C)
@@ -102,25 +92,35 @@ blueprint:
           step: 0.1
           unit_of_measurement: "°C"
           mode: slider
-
-    # ── 5. NOTIFICATION ──────────────────────────────────────────────────────
+    # ── 6. NOTIFICATION ──────────────────────────────────────────────────────
     notification_target:
       name: Service de notification
       description: >
         Service notify complet à appeler pour les alertes.
         Saisir le nom complet incluant "notify." — exemples :
-
           notify.group_de_notification_les_cheris
           notify.group_de_notification_admin
           notify.mobile_app_mon_telephone
-
         Les groupes définis dans configuration.yaml (notify: platform: group)
         sont recommandés pour éviter de reconfigurer si vous changez d'appareil.
       default: "notify.group_de_notification_les_cheris"
       selector:
         text:
-
-    # ── 6. CLIMATISATION ─────────────────────────────────────────────────────
+    # ── 7. FLAG NOTIFICATION ─────────────────────────────────────────────────
+    notif_deja_envoyee:
+      name: Flag alerte déjà envoyée (input_boolean)
+      description: >
+        input_boolean dédié pour mémoriser si une alerte a déjà été envoyée 
+        pour cette pièce. Crée un par pièce (ex. input_boolean.alerte_salon_envoyee).
+        Cela évite de recevoir la notification à chaque cycle de 2 minutes,
+        elle ne sera envoyée qu'une seule fois tant que la fenêtre reste ouverte
+        et le delta reste bas. Le flag est réinitialisé quand la fenêtre se ferme.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    # ── 8. CLIMATISATION ─────────────────────────────────────────────────────
     gestion_clim:
       name: Gérer la climatisation ?
       description: >
@@ -129,7 +129,6 @@ blueprint:
       default: false
       selector:
         boolean:
-
     clim_entity:
       name: Entité climatisation (optionnel)
       description: >
@@ -140,7 +139,6 @@ blueprint:
         entity:
           filter:
             - domain: climate
-
     memoire_clim:
       name: Mémoire état clim (input_boolean, optionnel)
       description: >
@@ -152,7 +150,6 @@ blueprint:
         entity:
           filter:
             - domain: input_boolean
-
 # ─────────────────────────────────────────────────────────────────────────────
 # VARIABLES — auto-detect entities from area via area_entities()
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,8 +164,8 @@ variables:
   v_memoire:          !input memoire_clim
   v_fenetre:          !input fenetre_boolean
   v_tendance:         !input sensor_tendance
+  v_notif_flag:       !input notif_deja_envoyee
   notification_target: !input notification_target
-
   # Computed delta interior - exterior
   v_delta: >
     {% set t_int = states(v_int) | float(none) %}
@@ -178,47 +175,39 @@ variables:
     {% else %}
       {{ (t_int - t_ext) | round(1) }}
     {% endif %}
-
   # Friendly area name for notifications
   v_piece_label: >
     {{ area_name(v_area) | default('la pièce') }}
-
 # ─────────────────────────────────────────────────────────────────────────────
 # TRIGGERS
 # ─────────────────────────────────────────────────────────────────────────────
 triggers:
-
   # Periodic delta check — triggers every 2 minutes
   # Note: time_pattern requires "/N" string syntax for "every N minutes".
   # !input cannot produce this format, so the interval is fixed at 2 minutes.
   - trigger: time_pattern
     id: check_delta
     minutes: "/2"
-
   # Window opened — classic state trigger on the explicit input_boolean
   - trigger: state
     id: fenetre_ouverte
     entity_id: !input fenetre_boolean
     to: "on"
-
   # Window closed
   - trigger: state
     id: fenetre_fermee
     entity_id: !input fenetre_boolean
     to: "off"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONDITIONS
 # ─────────────────────────────────────────────────────────────────────────────
 conditions: []
-
 # ─────────────────────────────────────────────────────────────────────────────
 # ACTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 actions:
   - choose:
-
-      # ── Periodic check: delta too low → alert ───────────────────────────────
+      # ── Periodic check: delta too low → alert (once) ──────────────────────
       - conditions:
           - condition: trigger
             id: check_delta
@@ -239,6 +228,9 @@ actions:
               {% else %}
                 true
               {% endif %}
+          # SOLUTION 1: notification flag must be OFF (not yet sent)
+          - condition: template
+            value_template: "{{ v_notif_flag == '' or is_state(v_notif_flag, 'off') }}"
         sequence:
           - action: "{{ notification_target }}"
             data:
@@ -246,7 +238,10 @@ actions:
               message: >
                 Plus utile de laisser ouvert : delta {{ v_delta }}°C
                 (intérieur {{ states(v_int) | round(1) }}°C / extérieur {{ states(v_ext) | round(1) }}°C)
-
+          # SOLUTION 1: mark notification as sent
+          - action: input_boolean.turn_on
+            target:
+              entity_id: "{{ v_notif_flag }}"
       # ── Window opened → cut clim if running ─────────────────────────────────
       - conditions:
           - condition: trigger
@@ -271,7 +266,6 @@ actions:
               - action: input_boolean.turn_off
                 target:
                   entity_id: "{{ v_memoire }}"
-
       # ── Window closed → restore clim if it was running ───────────────────────
       - conditions:
           - condition: trigger
@@ -287,6 +281,16 @@ actions:
           - action: input_boolean.turn_off
             target:
               entity_id: "{{ v_memoire }}"
-
+      # ── Window closed → reset notification flag ────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: fenetre_fermee
+          - condition: template
+            value_template: "{{ v_notif_flag != '' }}"
+        sequence:
+          # Reset notification flag for next time window opens
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ v_notif_flag }}"
 mode: parallel
 max: 10
