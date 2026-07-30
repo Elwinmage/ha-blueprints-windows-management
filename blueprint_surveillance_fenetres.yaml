@@ -78,6 +78,7 @@ blueprint:
         entity:
           filter:
             - domain: input_boolean
+            - domain: binary_sensor
     # ── 5. SEUIL & FRÉQUENCE ─────────────────────────────────────────────────
     seuil_fermeture:
       name: Seuil de fermeture (°C)
