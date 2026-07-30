@@ -69,9 +69,9 @@ blueprint:
             - domain: binary_sensor
     # ── 4. FENÊTRE ───────────────────────────────────────────────────────────
     fenetre_boolean:
-      name: État de la fenêtre (input_boolean)
+      name: État de la fenêtre (input_boolean & binary_sensor)
       description: >
-        input_boolean représentant l'état ouvert/fermé de la fenêtre.
+        input_boolean ou binary_sensor représentant l'état ouvert/fermé de la fenêtre.
         Doit contenir "fenetre" dans l'entity_id et être assigné à la zone.
         Nécessaire pour les triggers — ne peut pas être auto-détecté.
       selector:
