@@ -1,5 +1,7 @@
 # 🪟 Surveillance fenêtre — aération par pièce
 
+**Version : 1.1.0**
+
 Blueprint Home Assistant qui surveille une fenêtre ouverte et alerte quand il n'est plus utile de laisser la pièce s'aérer. Les entités sont **détectées automatiquement** dans la zone via `area_entities()`. Optionnellement, coupe et rallume la climatisation en fonction de l'état de la fenêtre.
 
 Une instance du blueprint est créée **par pièce**.
@@ -40,17 +42,32 @@ Toutes les N minutes
             └─ (si tendance activée) température montante ?
                  └─ → Notification "ferme la fenêtre"
 
-Fenêtre ouverte (événement)
+Fenêtre ouverte depuis X (délai configurable)
   └─ Gestion clim activée ?
        └─ Clim en marche ?
             ├─ oui → mémoriser + couper la clim
             └─ non → réinitialiser la mémoire
+  (fenêtre refermée avant X → rien ne se passe, la clim continue)
 
-Fenêtre fermée (événement)
+Fenêtre fermée (événement, immédiat)
   └─ Gestion clim activée ?
        └─ Clim était en marche ?
             └─ oui → rallumer la clim + effacer la mémoire
 ```
+
+### Délai de coupure de la clim
+
+La coupure est temporisée par le paramètre **Délai avant coupure de la clim**
+(défaut : 1 minute). Le délai est porté par le trigger lui-même (`for:`), donc :
+
+- une ouverture plus courte que le délai n'a **aucun effet** sur la clim ;
+- le décompte est **restauré après un redémarrage** de Home Assistant
+  (évalué depuis le `last_changed` de la fenêtre) ;
+- la **remise en marche à la fermeture reste immédiate**, quel que soit le délai ;
+- mettre `0` restaure le comportement de la v1.0 (coupure dès l'ouverture).
+
+L'alerte d'aération, elle, n'est pas concernée : elle reste pilotée par le
+cycle de 2 minutes et le seuil de delta.
 
 ---
 
@@ -154,6 +171,7 @@ Quand activée, l'alerte est supprimée si la température baisse déjà : la pi
 |---|---|
 | **Gérer la climatisation** | Active la coupure/restauration de la clim. |
 | **Mémoire état clim** | `input_boolean` pour mémoriser l'état de la clim avant ouverture. Sélection manuelle. |
+| **Délai avant coupure de la clim** | Durée d'ouverture continue avant coupure de la clim. Défaut : `1 min`. `0` = coupure immédiate. |
 
 ### Blueprint global
 
@@ -190,6 +208,22 @@ La carte `carte_mushroom_fenetres.yaml` affiche :
 - ⚫ Gris — delta neutre
 - Chip atténué si fenêtre fermée
 - Tap → toggle la fenêtre · Hold → détail de l'entité
+
+---
+
+## Changelog
+
+### 1.1.0
+- Nouveau paramètre **Délai avant coupure de la clim** (`duration`, défaut 1 min) :
+  la clim n'est coupée que si la fenêtre reste ouverte en continu pendant ce délai.
+- La remise en marche de la clim à la fermeture reste immédiate.
+- Version affichée dans le nom des deux blueprints (`… (v1.1.0)`), visible
+  directement dans la liste des blueprints de Home Assistant pour suivre
+  les mises à jour.
+
+### 1.0.0
+- Version initiale : alerte d'aération sur delta de température,
+  gestion clim coupure/restauration, blueprint global, carte Mushroom.
 
 ---
 
