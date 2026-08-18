@@ -1,6 +1,6 @@
 # 🪟 Surveillance fenêtre — aération par pièce
 
-**Version : 1.1.0**
+**Version : 1.2.0**
 
 Blueprint Home Assistant qui surveille une fenêtre ouverte et alerte quand il n'est plus utile de laisser la pièce s'aérer. Les entités sont **détectées automatiquement** dans la zone via `area_entities()`. Optionnellement, coupe et rallume la climatisation en fonction de l'état de la fenêtre.
 
@@ -37,7 +37,7 @@ Le capteur extérieur est le seul à sélectionner manuellement (partagé entre 
 
 ```
 Toutes les N minutes
-  └─ Fenêtre ouverte ?
+  └─ Fenêtre ouverte depuis X (délai configurable) ?
        └─ delta calculable et < seuil ?
             └─ (si tendance activée) température montante ?
                  └─ → Notification "ferme la fenêtre"
@@ -47,7 +47,7 @@ Fenêtre ouverte depuis X (délai configurable)
        └─ Clim en marche ?
             ├─ oui → mémoriser + couper la clim
             └─ non → réinitialiser la mémoire
-  (fenêtre refermée avant X → rien ne se passe, la clim continue)
+  (fenêtre refermée avant X → rien ne se passe : ni coupure clim, ni notif)
 
 Fenêtre fermée (événement, immédiat)
   └─ Gestion clim activée ?
@@ -55,19 +55,27 @@ Fenêtre fermée (événement, immédiat)
             └─ oui → rallumer la clim + effacer la mémoire
 ```
 
-### Délai de coupure de la clim
+### Délai de prise en compte de l'ouverture
 
-La coupure est temporisée par le paramètre **Délai avant coupure de la clim**
-(défaut : 1 minute). Le délai est porté par le trigger lui-même (`for:`), donc :
+Un délai unique (**Délai de prise en compte de l'ouverture**, défaut : 1 minute)
+temporise les deux réactions à l'ouverture :
 
-- une ouverture plus courte que le délai n'a **aucun effet** sur la clim ;
-- le décompte est **restauré après un redémarrage** de Home Assistant
-  (évalué depuis le `last_changed` de la fenêtre) ;
-- la **remise en marche à la fermeture reste immédiate**, quel que soit le délai ;
-- mettre `0` restaure le comportement de la v1.0 (coupure dès l'ouverture).
+| Réaction | Temporisée par | Mécanisme |
+|---|---|---|
+| Coupure de la clim | oui | `for:` sur le trigger `fenetre_ouverte` |
+| Notification d'aération | oui | `for:` sur la condition d'état du cycle de 2 min |
+| Rallumage de la clim | **non — immédiat** | trigger `fenetre_fermee` |
+| Reset du flag de notif | **non — immédiat** | trigger `fenetre_fermee` |
 
-L'alerte d'aération, elle, n'est pas concernée : elle reste pilotée par le
-cycle de 2 minutes et le seuil de delta.
+Conséquences :
+
+- une ouverture plus courte que le délai n'a **aucun effet** : pas de coupure
+  clim, pas de notification ;
+- le décompte s'appuie sur le `last_changed` de la fenêtre, il est donc
+  **restauré après un redémarrage** de Home Assistant ;
+- la notification étant portée par le cycle de 2 minutes, elle part au premier
+  cycle qui suit la fin du délai (granularité de 2 min, inchangée) ;
+- mettre `0` restaure le comportement de la v1.0 (réaction dès l'ouverture).
 
 ---
 
@@ -171,7 +179,7 @@ Quand activée, l'alerte est supprimée si la température baisse déjà : la pi
 |---|---|
 | **Gérer la climatisation** | Active la coupure/restauration de la clim. |
 | **Mémoire état clim** | `input_boolean` pour mémoriser l'état de la clim avant ouverture. Sélection manuelle. |
-| **Délai avant coupure de la clim** | Durée d'ouverture continue avant coupure de la clim. Défaut : `1 min`. `0` = coupure immédiate. |
+| **Délai de prise en compte de l'ouverture** | Durée d'ouverture continue avant réaction (coupure clim **et** notification). Défaut : `1 min`. `0` = réaction immédiate. |
 
 ### Blueprint global
 
@@ -212,6 +220,14 @@ La carte `carte_mushroom_fenetres.yaml` affiche :
 ---
 
 ## Changelog
+
+### 1.2.0
+- Le délai s'applique désormais **aussi à la notification** d'aération :
+  aucune alerte tant que la fenêtre n'est pas ouverte depuis au moins le délai
+  configuré (`for:` sur la condition d'état du cycle périodique).
+- Paramètre renommé en **Délai de prise en compte de l'ouverture** (la clé
+  interne `delai_coupure_clim` est conservée : les automations existantes
+  gardent leur réglage, aucune reconfiguration nécessaire).
 
 ### 1.1.0
 - Nouveau paramètre **Délai avant coupure de la clim** (`duration`, défaut 1 min) :

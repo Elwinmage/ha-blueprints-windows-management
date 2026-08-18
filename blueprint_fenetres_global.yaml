@@ -1,6 +1,6 @@
-# Version: 1.1.0
+# Version: 1.2.0
 blueprint:
-  name: "Fenêtres — contrôle global (v1.1.0)"
+  name: "Fenêtres — contrôle global (v1.2.0)"
   description: >
     Blueprint orchestrateur : un input_boolean global pilote l'ensemble des
     fenêtres déclarées. Toggle global = ouvre toutes / ferme toutes.

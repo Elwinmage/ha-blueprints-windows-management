@@ -1,12 +1,13 @@
-# Version: 1.1.0
+# Version: 1.2.0
 blueprint:
-  name: "Surveillance fenêtre — aération par pièce (v1.1.0)"
+  name: "Surveillance fenêtre — aération par pièce (v1.2.0)"
   description: >
     Gère une fenêtre par pièce : calcule le delta intérieur/extérieur,
     alerte quand il n'est plus utile de laisser la fenêtre ouverte, et
     optionnellement coupe/rallume la climatisation.
-    La coupure de la clim peut être temporisée (fenêtre ouverte depuis
-    plus de X) ; la remise en marche à la fermeture reste immédiate.
+    La coupure de la clim et l'alerte d'aération sont temporisées par un
+    délai commun (fenêtre ouverte depuis plus de X) ; la remise en marche
+    de la clim à la fermeture reste immédiate.
     Tous les capteurs sont sélectionnés explicitement.
     Instancier une fois par pièce.
   domain: automation
@@ -143,16 +144,23 @@ blueprint:
         entity:
           filter:
             - domain: climate
+    # NOTE: the input key stays `delai_coupure_clim` for backward compatibility
+    # with automations created under v1.1.0, even though the delay now gates
+    # both the clim cut-off and the airing alert.
     delai_coupure_clim:
-      name: Délai avant coupure de la clim
+      name: Délai de prise en compte de l'ouverture
       description: >
         Durée pendant laquelle la fenêtre doit rester ouverte en continu
-        avant que la clim ne soit coupée. Évite de couper la clim pour une
+        avant que l'automatisation ne réagisse. Évite de réagir à une
         ouverture brève (aller/retour sur la terrasse, secouer un tapis…).
+        S'applique à deux choses :
+          - la coupure de la clim ;
+          - l'alerte « ferme la fenêtre » : aucune notification n'est envoyée
+            tant que la fenêtre n'est pas ouverte depuis au moins ce délai.
         Si la fenêtre est refermée avant la fin du délai, rien ne se passe.
         La remise en marche de la clim à la fermeture reste immédiate,
         quel que soit ce délai.
-        Mettre 0 pour couper la clim dès l'ouverture (comportement v1.0).
+        Mettre 0 pour réagir dès l'ouverture (comportement v1.0).
         Défaut : 1 minute.
       default:
         hours: 0
@@ -236,9 +244,13 @@ actions:
       - conditions:
           - condition: trigger
             id: check_delta
-          # Window must be open
-          - condition: template
-            value_template: "{{ v_fenetre != '' and is_state(v_fenetre, 'on') }}"
+          # Window must be open, and open for at least the configured delay.
+          # Native `for` on a state condition compares against last_changed,
+          # so a short opening never produces an alert.
+          - condition: state
+            entity_id: !input fenetre_boolean
+            state: "on"
+            for: !input delai_coupure_clim
           # Delta must be computable and below threshold
           - condition: template
             value_template: >
