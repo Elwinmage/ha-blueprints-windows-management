@@ -1,6 +1,6 @@
-# Version: 1.2.0
+# Version: 1.3.0
 blueprint:
-  name: "Surveillance fenêtre — aération par pièce (v1.2.0)"
+  name: "Surveillance fenêtre — aération par pièce (v1.3.0)"
   description: >
     Gère une fenêtre par pièce : calcule le delta intérieur/extérieur,
     alerte quand il n'est plus utile de laisser la fenêtre ouverte, et
@@ -47,8 +47,8 @@ blueprint:
       name: Utiliser le capteur de tendance ?
       description: >
         Si activé, l'alerte ne se déclenche que si la température de la pièce
-        est en hausse, évitant les faux positifs quand la pièce se refroidit
-        naturellement.
+        n'est PAS en hausse. Si la pièce se réchauffe malgré la fenêtre
+        ouverte, l'alerte part quand même.
       default: false
       selector:
         boolean:
@@ -76,8 +76,10 @@ blueprint:
       name: État de la fenêtre (input_boolean & binary_sensor)
       description: >
         input_boolean ou binary_sensor représentant l'état ouvert/fermé de la fenêtre.
-        Doit contenir "fenetre" dans l'entity_id et être assigné à la zone.
-        Nécessaire pour les triggers — ne peut pas être auto-détecté.
+        Une seule entité par instance : pour une pièce équipée de plusieurs
+        contacts, créez d'abord un groupe (Paramètres → Appareils et services →
+        Assistants → Groupe → Groupe de capteurs binaires, type "fenêtre",
+        option "tous OFF pour être OFF") et sélectionnez le groupe ici.
       selector:
         entity:
           filter:
@@ -180,7 +182,7 @@ blueprint:
           filter:
             - domain: input_boolean
 # ─────────────────────────────────────────────────────────────────────────────
-# VARIABLES — auto-detect entities from area via area_entities()
+# VARIABLES
 # ─────────────────────────────────────────────────────────────────────────────
 variables:
   v_area:             !input piece
@@ -221,16 +223,27 @@ triggers:
   # configured duration. If the window is closed before the delay elapses,
   # the trigger never fires and the clim is left untouched.
   # `for` is restored across HA restarts (evaluated from last_changed).
+  # `not_from` ignores unavailable -> on transitions: a Shelly BLU dropping
+  # off the BLE mesh and coming back would otherwise re-fire this branch on
+  # an already-open window and wipe the clim memory flag.
   - trigger: state
     id: fenetre_ouverte
     entity_id: !input fenetre_boolean
     to: "on"
+    not_from:
+      - "unavailable"
+      - "unknown"
     for: !input delai_coupure_clim
   # Window closed
+  # Same guard: unavailable -> off must not restart the clim while the
+  # window is in fact still open.
   - trigger: state
     id: fenetre_fermee
     entity_id: !input fenetre_boolean
     to: "off"
+    not_from:
+      - "unavailable"
+      - "unknown"
 # ─────────────────────────────────────────────────────────────────────────────
 # CONDITIONS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,11 +287,16 @@ actions:
               title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
               message: >
                 Plus utile de laisser ouvert : delta {{ v_delta }}°C
-                (intérieur {{ states(v_int) | round(1) }}°C / extérieur {{ states(v_ext) | round(1) }}°C)
-          # SOLUTION 1: mark notification as sent
-          - action: input_boolean.turn_on
-            target:
-              entity_id: "{{ v_notif_flag }}"
+                (intérieur {{ states(v_int) | float(0) | round(1) }}°C / extérieur {{ states(v_ext) | float(0) | round(1) }}°C)
+          # Mark notification as sent. Guarded: the input is optional and
+          # calling a service with an empty entity_id aborts the sequence.
+          - if:
+              - condition: template
+                value_template: "{{ v_notif_flag != '' }}"
+            then:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: "{{ v_notif_flag }}"
       # ── Window open for X → cut clim if running ─────────────────────────────
       - conditions:
           - condition: trigger
