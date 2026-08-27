@@ -1,260 +1,94 @@
-type: custom:mushroom-chips-card
-card_mod:
-  style: |
-    ha-card {
-      margin: -4px -4px 4px -4px !important;
-      border-radius: 0 !important;
-      box-shadow: none !important;
-      border-bottom: 1px solid var(--divider-color) !important;
-    }
-    ha-card .chips {
-      flex-wrap: wrap !important;
-      gap: 4px !important;
-      padding: 8px 12px !important;
-    }
-chips:
-  # Global chip: every Shelly BLU window contact is picked up automatically.
-  # The double filter (device name + "fenetre") keeps out the other binary
-  # entities exposed by the same device (tilt/rotation, etc.).
-  # No `entity`: this chip is a pure summary computed from the contacts
-  # themselves, it no longer mirrors any helper. Hence no tap action either.
-  - type: template
-    icon: >
-      {% set fenetres = states.binary_sensor
-           | selectattr('entity_id', 'search', 'shelly_blu_door_window')
-           | selectattr('entity_id', 'search', 'fenetre')
-           | rejectattr('state', 'in', ['unavailable', 'unknown'])
-           | list %}
-      {{ 'mdi:window-open-variant'
-         if fenetres | selectattr('state', 'eq', 'on') | list | count > 0
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set fenetres = states.binary_sensor
-           | selectattr('entity_id', 'search', 'shelly_blu_door_window')
-           | selectattr('entity_id', 'search', 'fenetre')
-           | rejectattr('state', 'in', ['unavailable', 'unknown'])
-           | list %}
-      {% set nb = fenetres | selectattr('state', 'eq', 'on') | list | count %}
-      {% if nb == 0 %}grey
-      {% elif nb == fenetres | count %}green
-      {% else %}orange{% endif %}
-    content: >
-      {% set fenetres = states.binary_sensor
-           | selectattr('entity_id', 'search', 'shelly_blu_door_window')
-           | selectattr('entity_id', 'search', 'fenetre')
-           | rejectattr('state', 'in', ['unavailable', 'unknown'])
-           | list %}
-      {% set nb = fenetres | selectattr('state', 'eq', 'on') | list | count %}
-      {% set total = fenetres | count %}
-      {% if total == 0 %}N/C
-      {% elif nb == 0 %}Tout fermé
-      {% elif nb == total %}Tout ouvert
-      {% else %}{{ nb }}/{{ total }} ouvertes{% endif %}
-    tap_action:
-      action: none
-    hold_action:
-      action: none
+# Requires HACS: auto-entities, mushroom, card-mod.
+# Nothing is declared here: rooms, contacts and delta sensors are all derived
+# from the HA area registry. Pairing a new Shelly and assigning it to an area
+# is enough for its chip to appear.
+type: custom:auto-entities
+card_param: chips
+card:
+  type: custom:mushroom-chips-card
+  card_mod:
+    style: |
+      ha-card {
+        margin: -4px -4px 4px -4px !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        border-bottom: 1px solid var(--divider-color) !important;
+      }
+      ha-card .chips {
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+        padding: 8px 12px !important;
+      }
+filter:
+  template: |
+    {#- Optional label overrides, keyed by area_id. Areas not listed here use
+        their registry name as-is. Only needed to shorten long room names. -#}
+    {%- set alias = {} -%}
+    {#- e.g. {'chambre_parentale': 'Ch. Parentale', 'chambre_de_roxane': 'Roxane'} -#}
 
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_7374_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_7374_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_salon') | float(none) %} {% if d is none
-      %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{% endif %}
-    content: >
-      {%- set d = states('sensor.aerer_salon') | float(none) %} Salon{%- if d is
-      not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_7374_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
+    {#- Every Shelly BLU window contact, whatever its area.
+        The double filter keeps out the other binary entities of the same
+        device (tilt/rotation…). -#}
+    {%- set contacts = states.binary_sensor
+          | selectattr('entity_id', 'search', 'shelly_blu_door_window')
+          | selectattr('entity_id', 'search', 'fenetre')
+          | map(attribute='entity_id') | list -%}
 
-  - type: template
-    entity: binary_sensor.chambre_parentale_shelly_blu_door_window_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.chambre_parentale_shelly_blu_door_window_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_chambre_parentale') | float(none) %} {% if
-      d is none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set d = states('sensor.aerer_chambre_parentale') | float(none) %} Ch.
-      Parentale{%- if d is not none %} · {{ '+' if d > 0 else '' }}{{ d |
-      round(1) }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.chambre_parentale_shelly_blu_door_window_fenetre',
-        'off') %}opacity: 0.55;{% endif %} }
+    {#- ── SUMMARY CHIP ──────────────────────────────────────────────────────
+        Counts every contact found, including any not assigned to an area
+        (which would otherwise be invisible). Unavailable ones are excluded
+        from both counts, so a Shelly off the BLE mesh is never read as closed.
+    -#}
+    {%- set dispo = expand(contacts)
+          | rejectattr('state', 'in', ['unavailable', 'unknown']) | list -%}
+    {%- set nb = dispo | selectattr('state', 'eq', 'on') | list | count -%}
+    {%- set total = dispo | count -%}
+    {%- set ns = namespace(pieces=[], chips=[{
+      'type': 'template',
+      'icon': 'mdi:window-open-variant' if nb > 0 else 'mdi:window-closed-variant',
+      'icon_color': 'grey' if nb == 0 else ('green' if nb == total else 'orange'),
+      'content': 'N/C' if total == 0 else (
+                 'Tout fermé' if nb == 0 else (
+                 'Tout ouvert' if nb == total else nb ~ '/' ~ total ~ ' ouvertes')),
+      'tap_action': {'action': 'none'},
+      'hold_action': {'action': 'none'}
+    }]) -%}
 
-  # Roxane: two Shelly contacts for one room.
-  # TODO: replace the XXXX entity below with the second Shelly's real entity_id.
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_0507_fenetre
-    icon: >
-      {% set roxane = ['binary_sensor.shelly_blu_door_window_0507_fenetre',
-                       'binary_sensor.shelly_blu_door_window_XXXX_fenetre'] %}
-      {% set nb = expand(roxane) | selectattr('state', 'eq', 'on') | list | count %}
-      {{ 'mdi:window-open-variant' if nb > 0 else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_chambre_roxane') | float(none) %} {% if d
-      is none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set roxane = ['binary_sensor.shelly_blu_door_window_0507_fenetre',
-                        'binary_sensor.shelly_blu_door_window_XXXX_fenetre'] -%}
-      {%- set nb = expand(roxane) | selectattr('state', 'eq', 'on') | list | count -%}
-      {%- set total = expand(roxane) | list | count -%}
-      {%- set d = states('sensor.aerer_chambre_roxane') | float(none) -%}
-      Roxane{%- if nb > 0 and nb < total %} {{ nb }}/{{ total }}{% endif %}
-      {%- if d is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        {% set roxane = ['binary_sensor.shelly_blu_door_window_0507_fenetre',
-                         'binary_sensor.shelly_blu_door_window_XXXX_fenetre'] %}
-        {% set nb = expand(roxane) | selectattr('state', 'eq', 'on') | list | count %}
-        :host { {% if nb == 0 %}opacity: 0.55;{% endif %} }
+    {#- ── ONE ROW PER AREA ────────────────────────────────────────────────
+        area_id() falls back to the device's area, so entities left on
+        "inherit from device" are resolved too. Rows are sorted by label to
+        keep a stable chip order across restarts.
+    -#}
+    {%- for a in contacts | map('area_id') | reject('none') | unique | list -%}
+      {%- set ac = area_entities(a)
+            | select('search', 'shelly_blu_door_window')
+            | select('search', 'fenetre') | list -%}
+      {%- set aerer = area_entities(a)
+            | select('search', 'sensor\.aerer_') | list | first -%}
+      {%- set ns.pieces = ns.pieces
+            + [(alias.get(a, area_name(a)), aerer, ac)] -%}
+    {%- endfor -%}
 
-  # ── Rooms waiting for their Shelly: replace the TODO entity_id in the three
-  # spots of each chip (entity, icon, card_mod). Nothing else to change.
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_TODO_bureau_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_TODO_bureau_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_bureau') | float(none) %} {% if d is none
-      %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{% endif %}
-    content: >
-      {%- set d = states('sensor.aerer_bureau') | float(none) %} Bureau{%- if d
-      is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_TODO_bureau_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
+    {%- for label, aerer, ac in ns.pieces | sort -%}
+      {%- set presents = expand(ac) | list -%}
+      {%- set ouvertes = presents | selectattr('state', 'eq', 'on') | list | count -%}
+      {%- set d = states(aerer) | float(none) if aerer else none -%}
+      {#- Partial state is only shown for multi-window rooms -#}
+      {%- set frac = (' ' ~ ouvertes ~ '/' ~ presents | count)
+                     if (ouvertes > 0 and ouvertes < presents | count) else '' -%}
+      {%- set delta = '' if d is none else
+            ' · ' ~ ('+' if d > 0 else '') ~ (d | round(1)) ~ '°C' -%}
+      {%- set couleur = 'grey' if d is none else
+            ('blue' if d > 0.3 else ('red' if d < 0 else 'grey')) -%}
+      {%- set ns.chips = ns.chips + [{
+        'type': 'template',
+        'entity': ac | first,
+        'icon': 'mdi:window-open-variant' if ouvertes > 0 else 'mdi:window-closed-variant',
+        'icon_color': couleur,
+        'content': label ~ frac ~ delta,
+        'tap_action': {'action': 'more-info'},
+        'card_mod': {'style': ':host { opacity: 0.55; }'} if ouvertes == 0 else {}
+      }] -%}
+    {%- endfor -%}
 
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_TODO_chambre_d_amis_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_TODO_chambre_d_amis_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_chambre_d_amis') | float(none) %} {% if d
-      is none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set d = states('sensor.aerer_chambre_d_amis') | float(none) %} Ch.
-      d'Amis{%- if d is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1)
-      }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_TODO_chambre_d_amis_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
-
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_TODO_salle_de_sport_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_TODO_salle_de_sport_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_salle_de_sport') | float(none) %} {% if d
-      is none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set d = states('sensor.aerer_salle_de_sport') | float(none) %}
-      Sport{%- if d is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1)
-      }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_TODO_salle_de_sport_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
-
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_TODO_chambre_alexy_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_TODO_chambre_alexy_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_chambre_alexy') | float(none) %} {% if d
-      is none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set d = states('sensor.aerer_chambre_alexy') | float(none) %} Alexy{%-
-      if d is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C{%
-      endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_TODO_chambre_alexy_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
-
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_TODO_chambre_lea_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_TODO_chambre_lea_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_chambre_lea') | float(none) %} {% if d is
-      none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set d = states('sensor.aerer_chambre_lea') | float(none) %} Léa{%- if
-      d is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1) }}°C{% endif
-      %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_TODO_chambre_lea_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
-
-  - type: template
-    entity: binary_sensor.shelly_blu_door_window_TODO_salle_de_bain_fenetre
-    icon: |
-      {{ 'mdi:window-open-variant'
-         if is_state('binary_sensor.shelly_blu_door_window_TODO_salle_de_bain_fenetre', 'on')
-         else 'mdi:window-closed-variant' }}
-    icon_color: >
-      {% set d = states('sensor.aerer_salle_de_bain') | float(none) %} {% if d
-      is none %}grey {% elif d > 0.3 %}blue{% elif d < 0 %}red{% else %}grey{%
-      endif %}
-    content: >
-      {%- set d = states('sensor.aerer_salle_de_bain') | float(none) %}Salle de
-      Bain{%- if d is not none %} · {{ '+' if d > 0 else '' }}{{ d | round(1)
-      }}°C{% endif %}
-    tap_action:
-      action: more-info
-    card_mod:
-      style: >
-        :host { {% if
-        is_state('binary_sensor.shelly_blu_door_window_TODO_salle_de_bain_fenetre', 'off')
-        %}opacity: 0.55;{% endif %} }
+    {{ ns.chips }}
