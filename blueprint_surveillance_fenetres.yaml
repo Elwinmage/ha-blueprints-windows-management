@@ -1,23 +1,36 @@
-# Version: 2.0.0
+# Version: 3.0.0
+#
+# Required per-room helpers (create one input_boolean per instantiated room):
+#   - notif_deja_envoyee : dedup for the "close the window" airing alert
+#   - memoire_clim       : remembers the clim was running before opening
+#   - flag_pluie_envoyee : dedup for the rain alert (only if rain alert enabled)
+# Everything else (window contacts, indoor temperature, clim) is auto-discovered
+# from the selected Home Assistant area; override inputs are provided as escape
+# hatches when auto-discovery is ambiguous.
 blueprint:
-  name: "Surveillance fenêtre — aération par pièce (v2.0.0)"
+  name: "Surveillance fenêtre — auto-découverte par pièce (v3.0.0)"
   description: >
-    Gère une pièce et ses fenêtres : calcule le delta intérieur/extérieur,
-    alerte quand il n'est plus utile de laisser ouvert, et optionnellement
-    coupe/rallume la climatisation.
-    Une pièce peut déclarer plusieurs contacts de fenêtre (ex. chambre à
-    deux fenêtres) : la pièce est considérée « ouverte » dès qu'un contact
-    est ouvert, et « fermée » seulement quand ils le sont tous.
-    La coupure de la clim et l'alerte d'aération sont temporisées par un
-    délai commun (au moins une fenêtre ouverte depuis plus de X) ; la remise
-    en marche de la clim à la fermeture reste immédiate.
-    Une seule alerte et une seule mémoire clim par pièce, quel que soit le
-    nombre de fenêtres.
-    Instancier une fois par pièce.
+    Sélectionnez une PIÈCE (zone HA) et l'automatisation découvre seule ses
+    contacts de fenêtre (Shelly BLU DoorWindow…), sa température intérieure et
+    sa climatisation. Elle calcule le delta intérieur/extérieur, alerte quand
+    il n'est plus utile de laisser ouvert, coupe/rallume la clim, et peut
+    alerter si une fenêtre reste ouverte sous la pluie.
 
-    BREAKING v1.3.0 -> v2.0.0 : l'entrée « fenêtres » accepte désormais
-    plusieurs entités. Les automatisations existantes (une seule entité)
-    restent compatibles, la valeur est normalisée en liste.
+    Le seul capteur « global » à renseigner est la température extérieure.
+    Chaque pièce a besoin de quelques helpers input_boolean dédiés (voir la
+    description des champs Flag / Mémoire).
+
+    Découverte automatique par zone :
+      - fenêtres  = binary_sensor de la zone dont le device_class figure dans
+                    « device_class des contacts » (défaut : window, door, opening) ;
+      - intérieur = moyenne des sensor température de la zone ;
+      - clim      = tous les climate de la zone.
+    Chaque découverte peut être forcée par un champ « Override » optionnel.
+
+    BREAKING v2.0.0 -> v3.0.0 : le blueprint est désormais piloté par la ZONE.
+    Les fenêtres, la température intérieure et la clim ne sont plus saisies mais
+    déduites de la pièce (rattachez bien vos entités/appareils à la zone et
+    donnez le bon device_class aux contacts). Réinstancier par pièce.
   domain: automation
   author: Elwin
   homeassistant:
@@ -27,20 +40,11 @@ blueprint:
     piece:
       name: Pièce / Zone
       description: >
-        Zone Home Assistant correspondant à la pièce surveillée.
-        Utilisée pour nommer la pièce dans les notifications.
+        Zone Home Assistant surveillée. Sert à la fois à nommer la pièce dans
+        les notifications ET à découvrir automatiquement ses entités.
       selector:
         area:
-    # ── 2. CAPTEURS TEMPÉRATURE ──────────────────────────────────────────────
-    sensor_interieur:
-      name: Capteur température intérieure
-      description: >
-        Capteur de température de la pièce.
-      selector:
-        entity:
-          filter:
-            - domain: sensor
-              device_class: temperature
+    # ── 2. TEMPÉRATURE EXTÉRIEURE (globale) ──────────────────────────────────
     sensor_exterieur:
       name: Capteur température extérieure
       description: >
@@ -50,56 +54,75 @@ blueprint:
           filter:
             - domain: sensor
               device_class: temperature
-    # ── 3. TENDANCE ──────────────────────────────────────────────────────────
-    utiliser_tendance:
-      name: Utiliser le capteur de tendance ?
+    # ── 3. DÉCOUVERTE : device_class des contacts ────────────────────────────
+    device_classes_fenetre:
+      name: device_class des contacts de fenêtre
       description: >
-        Si activé, l'alerte ne se déclenche que si la température de la pièce
-        n'est PAS en hausse. Si la pièce se réchauffe malgré la fenêtre
-        ouverte, l'alerte part quand même.
-      default: false
+        Liste (séparée par des virgules) des device_class considérés comme des
+        contacts de fenêtre lors de la découverte automatique.
+        Vérifiez le device_class réel de vos Shelly BLU DoorWindow dans
+        Outils de développement → États. Défaut : window,door,opening
+      default: "window,door,opening"
       selector:
-        boolean:
-    sensor_tendance:
-      name: Capteur de tendance (binary_sensor)
+        text:
+    # ── 4. OVERRIDES (optionnels) ────────────────────────────────────────────
+    override_fenetres:
+      name: "Override — contacts de fenêtre (optionnel)"
       description: >
-        binary_sensor indiquant la tendance de température de la pièce.
-        État "on" = température montante, "off" = descendante ou stable.
-        L'alerte est envoyée uniquement si la tendance est "off" (descendante
-        ou stable) — si la pièce se refroidit déjà toute seule, inutile d'alerter.
-        Si la tendance est "on" (montante) et le delta est faible, l'alerte
-        part quand même car la pièce va continuer à se réchauffer.
-        Si vous n'en avez pas encore : Paramètres → Appareils et services →
-        Ajouter une intégration → "Capteur de gradient" (Derivative).
-        Sélectionnez le capteur de température de la pièce, réglez
-        "Nombre minimum d'échantillons" à 5 et "Taux minimum de changement"
-        à 0.0006.
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: binary_sensor
-    # ── 4. FENÊTRE ───────────────────────────────────────────────────────────
-    # NOTE: the input key stays `fenetre_boolean` for backward compatibility
-    # with automations created before v2.0.0, where it held a single entity_id.
-    fenetre_boolean:
-      name: Contacts de fenêtre de la pièce
-      description: >
-        Contacts ouvert/fermé de la pièce : binary_sensor (Shelly BLU…) ou
-        input_boolean. Sélectionnez-en autant que la pièce compte de fenêtres.
-        La pièce est ouverte dès qu'un contact est ouvert ; la clim n'est
-        rallumée et l'alerte réarmée que lorsque tous sont fermés.
+        Si renseigné, remplace la découverte automatique des fenêtres pour
+        cette pièce. Laisser vide pour l'auto-découverte.
+      default: []
       selector:
         entity:
           filter:
             - domain: input_boolean
             - domain: binary_sensor
           multiple: true
-    # ── 5. SEUIL & FRÉQUENCE ─────────────────────────────────────────────────
+    override_sensor_interieur:
+      name: "Override — température intérieure (optionnel)"
+      description: >
+        Si renseigné, remplace la moyenne des sondes de température de la zone.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    override_clim:
+      name: "Override — climatisation (optionnel)"
+      description: >
+        Si renseigné, remplace la découverte automatique des climate de la zone.
+      default: []
+      selector:
+        entity:
+          filter:
+            - domain: climate
+          multiple: true
+    # ── 5. TENDANCE ──────────────────────────────────────────────────────────
+    utiliser_tendance:
+      name: Utiliser le capteur de tendance ?
+      description: >
+        Si activé, l'alerte d'aération ne part que si la température de la pièce
+        n'est PAS en hausse.
+      default: false
+      selector:
+        boolean:
+    sensor_tendance:
+      name: Capteur de tendance (binary_sensor)
+      description: >
+        binary_sensor de tendance de température de la pièce. "on" = montante,
+        "off" = descendante/stable. L'alerte n'est envoyée que si "off".
+        (Aucune découverte auto : la tendance n'a pas de device_class dédié.)
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+    # ── 6. SEUIL AÉRATION ────────────────────────────────────────────────────
     seuil_fermeture:
       name: Seuil de fermeture (°C)
       description: >
-        Alerte envoyée quand le delta (intérieur − extérieur) passe sous ce seuil.
+        Alerte quand le delta (intérieur − extérieur) passe sous ce seuil.
         Défaut : 0.3 °C
       default: 0.3
       selector:
@@ -109,29 +132,20 @@ blueprint:
           step: 0.1
           unit_of_measurement: "°C"
           mode: slider
-    # ── 6. NOTIFICATION ──────────────────────────────────────────────────────
+    # ── 7. NOTIFICATION ──────────────────────────────────────────────────────
     notification_target:
       name: Service de notification
       description: >
-        Service notify complet à appeler pour les alertes.
-        Saisir le nom complet incluant "notify." — exemples :
-          notify.group_de_notification_les_cheris
-          notify.group_de_notification_admin
-          notify.mobile_app_mon_telephone
-        Les groupes définis dans configuration.yaml (notify: platform: group)
-        sont recommandés pour éviter de reconfigurer si vous changez d'appareil.
+        Service notify complet (incluant "notify."), ex.
+        notify.group_de_notification_les_cheris
       default: "notify.group_de_notification_les_cheris"
       selector:
         text:
-    # ── 7. FLAG NOTIFICATION ─────────────────────────────────────────────────
     notif_deja_envoyee:
-      name: Flag alerte déjà envoyée (input_boolean)
+      name: Flag alerte aération déjà envoyée (input_boolean)
       description: >
-        input_boolean dédié pour mémoriser si une alerte a déjà été envoyée 
-        pour cette pièce. Crée un par pièce (ex. input_boolean.alerte_salon_envoyee).
-        Cela évite de recevoir la notification à chaque cycle de 2 minutes,
-        elle ne sera envoyée qu'une seule fois tant que la fenêtre reste ouverte
-        et le delta reste bas. Le flag est réinitialisé quand la fenêtre se ferme.
+        input_boolean dédié par pièce, pour n'envoyer l'alerte d'aération
+        qu'une fois tant que la pièce reste ouverte. Réinitialisé à la fermeture.
       default: ""
       selector:
         entity:
@@ -141,39 +155,17 @@ blueprint:
     gestion_clim:
       name: Gérer la climatisation ?
       description: >
-        Si activé, coupe la clim quand la fenêtre est ouverte et la rallume
-        (si elle tournait) quand la fenêtre est refermée.
+        Si activé, coupe la clim (découverte auto) quand la pièce est ouverte
+        assez longtemps et la rallume quand elle est refermée.
       default: false
       selector:
         boolean:
-    clim_entity:
-      name: Entité climatisation (optionnel)
-      description: >
-        Entité climate à couper/rallumer selon l'état de la fenêtre.
-        Obligatoire si "Gérer la climatisation" est activé.
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: climate
-    # NOTE: the input key stays `delai_coupure_clim` for backward compatibility
-    # with automations created under v1.1.0, even though the delay now gates
-    # both the clim cut-off and the airing alert.
     delai_coupure_clim:
       name: Délai de prise en compte de l'ouverture
       description: >
-        Durée pendant laquelle la fenêtre doit rester ouverte en continu
-        avant que l'automatisation ne réagisse. Évite de réagir à une
-        ouverture brève (aller/retour sur la terrasse, secouer un tapis…).
-        S'applique à deux choses :
-          - la coupure de la clim ;
-          - l'alerte « ferme la fenêtre » : aucune notification n'est envoyée
-            tant que la fenêtre n'est pas ouverte depuis au moins ce délai.
-        Si la fenêtre est refermée avant la fin du délai, rien ne se passe.
-        La remise en marche de la clim à la fermeture reste immédiate,
-        quel que soit ce délai.
-        Mettre 0 pour réagir dès l'ouverture (comportement v1.0).
-        Défaut : 1 minute.
+        Durée d'ouverture continue avant réaction (coupure clim ET alerte
+        d'aération). La reprise de la clim à la fermeture reste immédiate.
+        Mettre 0 pour réagir dès l'ouverture. Défaut : 1 minute.
       default:
         hours: 0
         minutes: 1
@@ -181,38 +173,190 @@ blueprint:
       selector:
         duration:
     memoire_clim:
-      name: Mémoire état clim (input_boolean, optionnel)
+      name: Mémoire état clim (input_boolean)
       description: >
-        input_boolean dédié pour mémoriser si la clim tournait avant l'ouverture.
-        Créer un input_boolean par pièce (ex. input_boolean.clim_salon_etait_allumee).
-        Obligatoire si "Gérer la climatisation" est activé.
+        input_boolean dédié par pièce, mémorise que NOUS avons coupé une clim
+        qui tournait, pour la rallumer à la fermeture. Obligatoire si
+        "Gérer la climatisation" est activé.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    # ── 9. ALERTE PLUIE ──────────────────────────────────────────────────────
+    alerte_pluie:
+      name: Alerter si fenêtre ouverte sous la pluie ?
+      description: >
+        Si activé, envoie une alerte quand la pièce est ouverte et qu'il pleut
+        (selon le capteur de pluie et/ou l'entité météo ci-dessous).
+      default: false
+      selector:
+        boolean:
+    capteur_pluie:
+      name: Capteur de pluie (binary_sensor, optionnel)
+      description: >
+        binary_sensor de pluie/moisture. "on" = il pleut. Peut être combiné
+        avec l'entité météo (l'un OU l'autre déclenche l'alerte).
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+    entite_meteo:
+      name: Entité météo (weather, optionnel)
+      description: >
+        Entité weather dont l'état courant sert de détection de pluie
+        (voir la liste des états ci-dessous).
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: weather
+    etats_meteo_pluie:
+      name: États météo considérés comme pluie
+      description: >
+        Liste (séparée par des virgules) des états weather comptant comme pluie.
+        Défaut : rainy,pouring,lightning-rainy,snowy-rainy,hail
+      default: "rainy,pouring,lightning-rainy,snowy-rainy,hail"
+      selector:
+        text:
+    flag_pluie_envoyee:
+      name: Flag alerte pluie déjà envoyée (input_boolean, optionnel)
+      description: >
+        input_boolean dédié par pièce pour ne pas répéter l'alerte pluie.
+        Réinitialisé quand la pièce se ferme OU quand il ne pleut plus.
       default: ""
       selector:
         entity:
           filter:
             - domain: input_boolean
 # ─────────────────────────────────────────────────────────────────────────────
-# VARIABLES
+# TRIGGER VARIABLES
+# Only plain !input values here (limited-template context). Reused by the
+# template triggers below to scope them to the selected area.
+# ─────────────────────────────────────────────────────────────────────────────
+trigger_variables:
+  v_area_tv: !input piece
+  v_dc_tv: !input device_classes_fenetre
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGERS
+# Idempotent design: every trigger runs the same evaluation, which reads the
+# current state. The heartbeat guarantees correctness; the template triggers
+# only add responsiveness and may over-fire harmlessly.
+# ─────────────────────────────────────────────────────────────────────────────
+triggers:
+  # Reliable heartbeat: re-evaluates delta / rain / clim every 2 minutes.
+  # time_pattern needs the literal "/N" syntax and cannot take an !input.
+  - trigger: time_pattern
+    id: check
+    minutes: "/2"
+  # Room became open (>=1 window contact of the area is "on") for the delay.
+  # area_entities() states referenced via is_state() are tracked as deps, so
+  # this re-evaluates when a window in the area changes.
+  - trigger: template
+    id: room_open
+    value_template: >
+      {% set dcs = v_dc_tv.split(',') | map('trim') | list %}
+      {% set ns = namespace(n=0) %}
+      {% for e in area_entities(v_area_tv) %}
+        {% if e.startswith('binary_sensor.')
+              and state_attr(e, 'device_class') in dcs
+              and is_state(e, 'on') %}
+          {% set ns.n = ns.n + 1 %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.n > 0 }}
+    for: !input delai_coupure_clim
+  # Room became fully closed (no window contact of the area is "on").
+  - trigger: template
+    id: room_closed
+    value_template: >
+      {% set dcs = v_dc_tv.split(',') | map('trim') | list %}
+      {% set ns = namespace(n=0) %}
+      {% for e in area_entities(v_area_tv) %}
+        {% if e.startswith('binary_sensor.')
+              and state_attr(e, 'device_class') in dcs
+              and is_state(e, 'on') %}
+          {% set ns.n = ns.n + 1 %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.n == 0 }}
+# ─────────────────────────────────────────────────────────────────────────────
+# CONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+conditions: []
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLES (rendered sequentially; later ones may use earlier ones)
 # ─────────────────────────────────────────────────────────────────────────────
 variables:
-  v_area:             !input piece
-  v_int:              !input sensor_interieur
-  v_ext:              !input sensor_exterieur
-  v_seuil:            !input seuil_fermeture
-  v_tendance_on:      !input utiliser_tendance
-  v_gestion_clim:     !input gestion_clim
-  v_clim:             !input clim_entity
-  v_memoire:          !input memoire_clim
-  # Accepts both shapes: a bare entity_id (pre-v2.0.0 automations) and a list.
-  v_fenetre_raw:      !input fenetre_boolean
+  v_area:            !input piece
+  v_ext:             !input sensor_exterieur
+  v_seuil:           !input seuil_fermeture
+  v_tendance_on:     !input utiliser_tendance
+  v_tendance:        !input sensor_tendance
+  v_gestion_clim:    !input gestion_clim
+  v_memoire:         !input memoire_clim
+  v_notif_flag:      !input notif_deja_envoyee
+  v_alerte_pluie:    !input alerte_pluie
+  v_rain_bin:        !input capteur_pluie
+  v_weather:         !input entite_meteo
+  v_pluie_flag:      !input flag_pluie_envoyee
+  notification_target: !input notification_target
+  # Accepted window device_class list.
+  v_dc_raw:          !input device_classes_fenetre
+  v_dc: >
+    {{ v_dc_raw.split(',') | map('trim') | list }}
+  # ── Auto-discovery: window contacts in the area ──────────────────────────
+  v_fenetres_auto: >
+    {% set ns = namespace(l=[]) %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('binary_sensor.')
+            and state_attr(e, 'device_class') in v_dc %}
+        {% set ns.l = ns.l + [e] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.l }}
+  v_override_fenetres: !input override_fenetres
   v_fenetres: >
-    {{ [v_fenetre_raw] if v_fenetre_raw is string else v_fenetre_raw }}
-  # Room-level state: open as soon as ONE contact is open.
+    {{ v_override_fenetres if (v_override_fenetres | count > 0)
+       else v_fenetres_auto }}
+  # ── Auto-discovery: temperature sensors in the area ──────────────────────
+  v_temp_auto: >
+    {% set ns = namespace(l=[]) %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('sensor.')
+            and state_attr(e, 'device_class') == 'temperature' %}
+        {% set ns.l = ns.l + [e] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.l }}
+  v_override_int: !input override_sensor_interieur
+  v_int_list: >
+    {{ [v_override_int] if v_override_int not in ['', none] else v_temp_auto }}
+  # ── Auto-discovery: climate entities in the area ─────────────────────────
+  v_clim_auto: >
+    {% set ns = namespace(l=[]) %}
+    {% for e in area_entities(v_area) %}
+      {% if e.startswith('climate.') %}
+        {% set ns.l = ns.l + [e] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.l }}
+  v_override_clim: !input override_clim
+  v_clim_list: >
+    {{ v_override_clim if (v_override_clim | count > 0) else v_clim_auto }}
+  v_clim_any_on: >
+    {{ expand(v_clim_list) | rejectattr('state', 'eq', 'off')
+       | rejectattr('state', 'eq', 'unavailable')
+       | rejectattr('state', 'eq', 'unknown') | list | count > 0 }}
+  # ── Room open state ──────────────────────────────────────────────────────
   v_nb_ouvertes: >
     {{ expand(v_fenetres) | selectattr('state', 'eq', 'on') | list | count }}
-  # Delay expressed in seconds, for the "open for at least X" template below.
-  # The duration selector yields a mapping; older configs may hold "HH:MM:SS".
-  v_delai_raw:        !input delai_coupure_clim
+  v_ouvertes_label: >
+    {{ expand(v_fenetres) | selectattr('state', 'eq', 'on')
+       | map(attribute='name') | join(', ') }}
+  # Delay in seconds (duration selector yields a mapping; legacy "HH:MM:SS").
+  v_delai_raw:       !input delai_coupure_clim
   v_delai_s: >
     {% if v_delai_raw is string %}
       {{ (as_timedelta(v_delai_raw) or timedelta(0)).total_seconds() | int }}
@@ -222,186 +366,161 @@ variables:
         + (v_delai_raw.minutes | default(0)) * 60
         + (v_delai_raw.seconds | default(0))) | int }}
     {% endif %}
-  # Names of the currently open windows, listed in the alert when the room
-  # has more than one.
-  v_ouvertes_label: >
-    {{ expand(v_fenetres) | selectattr('state', 'eq', 'on')
-       | map(attribute='name') | join(', ') }}
-  v_tendance:         !input sensor_tendance
-  v_notif_flag:       !input notif_deja_envoyee
-  notification_target: !input notification_target
-  # Computed delta interior - exterior
+  # At least one window open continuously for >= delay.
+  v_open_delayed: >
+    {{ expand(v_fenetres)
+       | selectattr('state', 'eq', 'on')
+       | selectattr('last_changed', 'lt',
+                    now() - timedelta(seconds=v_delai_s | int))
+       | list | count > 0 }}
+  # ── Temperatures & delta ─────────────────────────────────────────────────
+  # Averaged indoor temperature over the discovered sensors (numeric ones).
+  v_int_moyenne: >
+    {% set ns = namespace(sum=0.0, n=0) %}
+    {% for e in v_int_list %}
+      {% set v = states(e) | float(none) %}
+      {% if v is not none %}
+        {% set ns.sum = ns.sum + v %}{% set ns.n = ns.n + 1 %}
+      {% endif %}
+    {% endfor %}
+    {% if ns.n > 0 %}{{ (ns.sum / ns.n) | round(1) }}{% else %}none{% endif %}
+  # Delta interior - exterior, as a number-string or the literal 'none'.
   v_delta: >
-    {% set t_int = states(v_int) | float(none) %}
+    {% set t_int = v_int_moyenne %}
     {% set t_ext = states(v_ext) | float(none) %}
-    {% if t_int is none or t_ext is none %}
+    {% if t_int == 'none' or t_ext is none %}
       none
     {% else %}
-      {{ (t_int - t_ext) | round(1) }}
+      {{ (t_int | float - t_ext) | round(1) }}
     {% endif %}
-  # Friendly area name for notifications
+  # ── Rain detection ───────────────────────────────────────────────────────
+  v_meteo_raw:       !input etats_meteo_pluie
+  v_meteo_pluie: >
+    {{ v_meteo_raw.split(',') | map('trim') | list }}
+  v_il_pleut: >
+    {% set by_sensor = (v_rain_bin != '' and is_state(v_rain_bin, 'on')) %}
+    {% set by_weather = (v_weather != '' and states(v_weather) in v_meteo_pluie) %}
+    {{ by_sensor or by_weather }}
+  # Friendly area name for notifications.
   v_piece_label: >
     {{ area_name(v_area) | default('la pièce') }}
 # ─────────────────────────────────────────────────────────────────────────────
-# TRIGGERS
-# ─────────────────────────────────────────────────────────────────────────────
-triggers:
-  # Periodic delta check — triggers every 2 minutes
-  # Note: time_pattern requires "/N" string syntax for "every N minutes".
-  # !input cannot produce this format, so the interval is fixed at 2 minutes.
-  - trigger: time_pattern
-    id: check_delta
-    minutes: "/2"
-  # Window opened — fires only after the window stayed open for the
-  # configured duration. If the window is closed before the delay elapses,
-  # the trigger never fires and the clim is left untouched.
-  # `for` is restored across HA restarts (evaluated from last_changed).
-  # `not_from` ignores unavailable -> on transitions: a Shelly BLU dropping
-  # off the BLE mesh and coming back would otherwise re-fire this branch on
-  # an already-open window and wipe the clim memory flag.
-  - trigger: state
-    id: fenetre_ouverte
-    entity_id: !input fenetre_boolean
-    to: "on"
-    not_from:
-      - "unavailable"
-      - "unknown"
-    for: !input delai_coupure_clim
-  # Window closed
-  # Same guard: unavailable -> off must not restart the clim while the
-  # window is in fact still open.
-  - trigger: state
-    id: fenetre_fermee
-    entity_id: !input fenetre_boolean
-    to: "off"
-    not_from:
-      - "unavailable"
-      - "unknown"
-# ─────────────────────────────────────────────────────────────────────────────
-# CONDITIONS
-# ─────────────────────────────────────────────────────────────────────────────
-conditions: []
-# ─────────────────────────────────────────────────────────────────────────────
-# ACTIONS
+# ACTIONS — single idempotent evaluation, trigger-agnostic
 # ─────────────────────────────────────────────────────────────────────────────
 actions:
-  - choose:
-      # ── Periodic check: delta too low → alert (once) ──────────────────────
-      - conditions:
-          - condition: trigger
-            id: check_delta
-          # At least ONE window open for at least the configured delay.
-          # A state condition with several entities is an AND (all of them
-          # open), which is not what we want here, hence the template.
-          # last_changed is the per-entity equivalent of a native `for`.
-          - condition: template
-            value_template: >
-              {{ expand(v_fenetres)
-                 | selectattr('state', 'eq', 'on')
-                 | selectattr('last_changed', 'lt',
-                              now() - timedelta(seconds=v_delai_s | int))
-                 | list | count > 0 }}
-          # Delta must be computable and below threshold
-          - condition: template
-            value_template: >
-              {{ v_delta != 'none' and v_delta is not none
-                 and v_delta | float < v_seuil | float }}
-          # If tendance enabled: alert when temperature is NOT rising
-          # (if already cooling down, no need to alert — room is self-cooling)
-          - condition: template
-            value_template: >
-              {% if v_tendance_on and v_tendance != '' %}
-                {{ is_state(v_tendance, 'off') or is_state(v_tendance, 'unavailable') }}
-              {% else %}
-                true
-              {% endif %}
-          # SOLUTION 1: notification flag must be OFF (not yet sent)
-          - condition: template
-            value_template: "{{ v_notif_flag == '' or is_state(v_notif_flag, 'off') }}"
-        sequence:
-          - action: "{{ notification_target }}"
-            data:
-              title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
-              message: >
-                Plus utile de laisser ouvert : delta {{ v_delta }}°C
-                (intérieur {{ states(v_int) | float(0) | round(1) }}°C / extérieur {{ states(v_ext) | float(0) | round(1) }}°C)
-                {%- if v_fenetres | count > 1 %}
-                — ouverte(s) : {{ v_ouvertes_label }}
-                {%- endif %}
-          # Mark notification as sent. Guarded: the input is optional and
-          # calling a service with an empty entity_id aborts the sequence.
-          - if:
-              - condition: template
-                value_template: "{{ v_notif_flag != '' }}"
-            then:
-              - action: input_boolean.turn_on
-                target:
-                  entity_id: "{{ v_notif_flag }}"
-      # ── Window open for X → cut clim if running ─────────────────────────────
-      - conditions:
-          - condition: trigger
-            id: fenetre_ouverte
-          - condition: template
-            value_template: "{{ v_gestion_clim and v_clim != '' and v_memoire != '' }}"
-        sequence:
-          - choose:
-              # Clim is running → memorize then cut
-              - conditions:
-                  - condition: template
-                    value_template: "{{ not is_state(v_clim, 'off') }}"
-                sequence:
-                  - action: input_boolean.turn_on
-                    target:
-                      entity_id: "{{ v_memoire }}"
-                  - action: climate.turn_off
-                    target:
-                      entity_id: "{{ v_clim }}"
-              # Clim already off AND this is the first window of the room to
-              # open → nothing was running, clear the memory.
-              # On a second window opening, the clim is off because WE cut it:
-              # resetting here would strand the memory flag and the clim would
-              # never come back on at closing time.
-              - conditions:
-                  - condition: template
-                    value_template: "{{ v_nb_ouvertes | int <= 1 }}"
-                sequence:
-                  - action: input_boolean.turn_off
-                    target:
-                      entity_id: "{{ v_memoire }}"
-      # ── Window closed → restore clim immediately if it was running ──────────
-      - conditions:
-          - condition: trigger
-            id: fenetre_fermee
-          # Every window of the room must be closed: closing one of two
-          # would otherwise restart the clim with the other still open.
-          - condition: template
-            value_template: "{{ v_nb_ouvertes | int == 0 }}"
-          - condition: template
-            value_template: "{{ v_gestion_clim and v_clim != '' and v_memoire != '' }}"
-          - condition: template
-            value_template: "{{ is_state(v_memoire, 'on') }}"
-        sequence:
-          - action: climate.turn_on
-            target:
-              entity_id: "{{ v_clim }}"
-          - action: input_boolean.turn_off
-            target:
-              entity_id: "{{ v_memoire }}"
-      # ── Window closed → reset notification flag ────────────────────────────
-      - conditions:
-          - condition: trigger
-            id: fenetre_fermee
-          # Same rule: the alert is re-armed only once the room is fully closed.
-          - condition: template
-            value_template: "{{ v_nb_ouvertes | int == 0 }}"
+  # ── 1. Clim: cut it if the room stayed open long enough and a clim runs ───
+  - if:
+      - condition: template
+        value_template: >
+          {{ v_gestion_clim and (v_clim_list | count > 0) and v_memoire != '' }}
+      - condition: template
+        value_template: "{{ v_open_delayed }}"
+      - condition: template
+        value_template: "{{ is_state(v_memoire, 'off') }}"
+      - condition: template
+        value_template: "{{ v_clim_any_on }}"
+    then:
+      # Remember we cut a running clim, then cut every discovered clim.
+      - action: input_boolean.turn_on
+        target:
+          entity_id: "{{ v_memoire }}"
+      - action: climate.turn_off
+        target:
+          entity_id: "{{ v_clim_list }}"
+  # ── 2. Clim: restore it once the room is fully closed (if we cut it) ───────
+  - if:
+      - condition: template
+        value_template: >
+          {{ v_gestion_clim and (v_clim_list | count > 0) and v_memoire != '' }}
+      - condition: template
+        value_template: "{{ v_nb_ouvertes | int == 0 }}"
+      - condition: template
+        value_template: "{{ is_state(v_memoire, 'on') }}"
+    then:
+      - action: climate.turn_on
+        target:
+          entity_id: "{{ v_clim_list }}"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: "{{ v_memoire }}"
+  # ── 3. Airing alert: delta too low while open long enough (once) ──────────
+  - if:
+      - condition: template
+        value_template: "{{ v_open_delayed }}"
+      - condition: template
+        value_template: >
+          {{ v_delta != 'none' and v_delta | float < v_seuil | float }}
+      - condition: template
+        value_template: >
+          {% if v_tendance_on and v_tendance != '' %}
+            {{ is_state(v_tendance, 'off') or is_state(v_tendance, 'unavailable') }}
+          {% else %}
+            true
+          {% endif %}
+      - condition: template
+        value_template: "{{ v_notif_flag == '' or is_state(v_notif_flag, 'off') }}"
+    then:
+      - action: "{{ notification_target }}"
+        data:
+          title: "🪟 Ferme la fenêtre — {{ v_piece_label }}"
+          message: >
+            Plus utile de laisser ouvert : delta {{ v_delta }}°C
+            (intérieur {{ v_int_moyenne }}°C / extérieur {{ states(v_ext) | float(0) | round(1) }}°C)
+            {%- if v_fenetres | count > 1 %}
+            — ouverte(s) : {{ v_ouvertes_label }}
+            {%- endif %}
+      - if:
           - condition: template
             value_template: "{{ v_notif_flag != '' }}"
-        sequence:
-          # Reset notification flag for next time window opens
-          - action: input_boolean.turn_off
+        then:
+          - action: input_boolean.turn_on
             target:
               entity_id: "{{ v_notif_flag }}"
-# queued rather than parallel: two contacts of the same room can change
-# within the same second, and the branches read/write a shared memory flag.
+  # ── 4. Reset airing flag when the room is fully closed ────────────────────
+  - if:
+      - condition: template
+        value_template: "{{ v_nb_ouvertes | int == 0 and v_notif_flag != '' }}"
+    then:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: "{{ v_notif_flag }}"
+  # ── 5. Rain alert: window open and raining (once per rain episode) ────────
+  # Not gated by the open delay: rain is urgent, alert as soon as it's open.
+  - if:
+      - condition: template
+        value_template: "{{ v_alerte_pluie }}"
+      - condition: template
+        value_template: "{{ v_nb_ouvertes | int > 0 }}"
+      - condition: template
+        value_template: "{{ v_il_pleut }}"
+      - condition: template
+        value_template: "{{ v_pluie_flag == '' or is_state(v_pluie_flag, 'off') }}"
+    then:
+      - action: "{{ notification_target }}"
+        data:
+          title: "🌧️ Fenêtre ouverte sous la pluie — {{ v_piece_label }}"
+          message: >
+            Il pleut et la pièce est ouverte
+            {%- if v_fenetres | count > 1 %} — ouverte(s) : {{ v_ouvertes_label }}{%- endif %}.
+            Pense à fermer.
+      - if:
+          - condition: template
+            value_template: "{{ v_pluie_flag != '' }}"
+        then:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: "{{ v_pluie_flag }}"
+  # ── 6. Reset rain flag when room closed OR rain stopped ───────────────────
+  - if:
+      - condition: template
+        value_template: >
+          {{ v_pluie_flag != ''
+             and (v_nb_ouvertes | int == 0 or not v_il_pleut) }}
+    then:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: "{{ v_pluie_flag }}"
+# queued: several contacts of the same room can change within the same second,
+# and branches read/write shared memory flags.
 mode: queued
 max: 10
